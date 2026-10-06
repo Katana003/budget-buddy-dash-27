@@ -18,7 +18,9 @@ const GROUPS = [
 const SUBS = GROUPS.flatMap((g) => g.subs.map((s) => ({ ...s, group: g.name })));
 const subName = (id?: string) => SUBS.find((s) => s.id === id)?.name ?? "—";
 
-type Tx = { id: string; type: "deposit" | "expense"; amount: number; sub?: string; note: string; date: string };
+type Tx = { id: string; type: "deposit" | "expense"; amount: number; sub?: string; note: string; date: string; fee?: number };
+const feeOf = (t: Tx) => (Number.isFinite(t.fee) ? (t.fee as number) : 0);
+const newId = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
 
 const fmt = (n: number) => n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const monthOf = (d: string) => d.slice(0, 7);
@@ -66,42 +68,49 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
   const [charts, setCharts] = useState(false);
   const [from, setFrom] = useState(""); const [to, setTo] = useState("");
 
-  useEffect(() => { try { setTxs(JSON.parse(localStorage.getItem(DATA_KEY) || "[]")); } catch {} setLoaded(true); }, []);
+  useEffect(() => { try { const v = JSON.parse(localStorage.getItem(DATA_KEY) || "[]"); if (Array.isArray(v)) setTxs(v.filter((t) => t && typeof t.amount === "number" && typeof t.date === "string")); } catch {} setLoaded(true); }, []);
   useEffect(() => { if (loaded) localStorage.setItem(DATA_KEY, JSON.stringify(txs)); }, [txs, loaded]);
 
   // Carry-over: remaining balance of every earlier month rolls into the next.
   const stats = useMemo(() => {
     const months = Array.from(new Set([...txs.map((t) => monthOf(t.date)), month])).sort();
-    let carry = 0; let result = { carry: 0, deposits: 0, income: 0, spent: 0, remaining: 0 };
+    let carry = 0; let result = { carry: 0, deposits: 0, income: 0, spent: 0, fees: 0, remaining: 0 };
     for (const m of months) {
       if (m > month) break;
       const mt = txs.filter((t) => monthOf(t.date) === m);
       const deposits = mt.filter((t) => t.type === "deposit").reduce((a, t) => a + t.amount, 0);
       const spent = mt.filter((t) => t.type === "expense").reduce((a, t) => a + t.amount, 0);
+      const fees = mt.reduce((a, t) => a + feeOf(t), 0);
       const income = carry + deposits;
-      result = { carry, deposits, income, spent, remaining: income - spent };
-      carry = Math.max(0, income - spent);
+      result = { carry, deposits, income, spent, fees, remaining: income - spent - fees };
+      carry = Math.max(0, income - spent - fees);
     }
     return result;
   }, [txs, month]);
 
   const monthTx = txs.filter((t) => monthOf(t.date) === month);
   const spentBy = (sub: string) => monthTx.filter((t) => t.type === "expense" && t.sub === sub).reduce((a, t) => a + t.amount, 0);
+  // Running account balance: money actually in the account after each transaction and its cost.
+  const balances = useMemo(() => {
+    const m = new Map<string, number>(); let bal = 0;
+    [...txs].sort((a, b) => a.date.localeCompare(b.date)).forEach((t) => { bal += (t.type === "deposit" ? t.amount : -t.amount) - feeOf(t); m.set(t.id, bal); });
+    return m;
+  }, [txs]);
   const history = [...txs].filter((t) => (!from || t.date >= from) && (!to || t.date <= to)).sort((a, b) => b.date.localeCompare(a.date));
   const low = stats.remaining < 200;
 
-  const add = (t: Omit<Tx, "id">) => { setTxs((x) => [...x, { ...t, id: crypto.randomUUID() }]); setModal(null); };
+  const add = (t: Omit<Tx, "id">) => { setTxs((x) => [...x, { ...t, id: newId() }]); setModal(null); };
 
   const reportRows = () => {
     const alloc = SUBS.map((s) => [s.group, s.name, `${s.pct}%`, fmt(stats.income * s.pct / 100), fmt(spentBy(s.id)), fmt(stats.income * s.pct / 100 - spentBy(s.id))]);
-    const tx = [...monthTx].sort((a, b) => a.date.localeCompare(b.date)).map((t) => [t.date, t.type, subName(t.sub), t.note, fmt(t.amount)]);
+    const tx = [...monthTx].sort((a, b) => a.date.localeCompare(b.date)).map((t) => [t.date, t.type, subName(t.sub), t.note, fmt(t.amount), fmt(feeOf(t)), fmt(balances.get(t.id) ?? 0)]);
     return { alloc, tx };
   };
   const downloadCSV = () => {
     const { alloc, tx } = reportRows();
     const q = (r: string[]) => r.map((c) => `"${c.replace(/"/g, '""')}"`).join(",");
-    const lines = [`Monthly Report,${monthLabel(month)}`, `Carry-over,${fmt(stats.carry)}`, `Deposits,${fmt(stats.deposits)}`, `Total Income,${fmt(stats.income)}`, `Total Spent,${fmt(stats.spent)}`, `Remaining,${fmt(stats.remaining)}`, "",
-      q(["Group", "Sub-category", "Share", "Allocated", "Spent", "Left"]), ...alloc.map(q), "", q(["Date", "Type", "Sub-category", "Note", "Amount"]), ...tx.map(q)];
+    const lines = [`Monthly Report,${monthLabel(month)}`, `Carry-over,${fmt(stats.carry)}`, `Deposits,${fmt(stats.deposits)}`, `Total Income,${fmt(stats.income)}`, `Total Spent,${fmt(stats.spent)}`, `Transaction Costs,${fmt(stats.fees)}`, `Remaining,${fmt(stats.remaining)}`, "",
+      q(["Group", "Sub-category", "Share", "Allocated", "Spent", "Left"]), ...alloc.map(q), "", q(["Date", "Type", "Sub-category", "Note", "Amount", "Transaction Cost", "Account Balance"]), ...tx.map(q)];
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/csv" }));
     a.download = `report-${month}.csv`; a.click();
@@ -112,9 +121,9 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
     const w = window.open("", "_blank"); if (!w) return;
     w.document.write(`<html><head><title>Report ${month}</title><style>body{font-family:sans-serif;padding:24px}table{border-collapse:collapse;width:100%;margin:12px 0 24px}td,th{border:1px solid #ccc;padding:6px;text-align:left;font-size:12px}</style></head><body>
       <h1>Monthly Report — ${monthLabel(month)}</h1>
-      <p>Carry-over: ${fmt(stats.carry)} · Deposits: ${fmt(stats.deposits)} · Income: ${fmt(stats.income)} · Spent: ${fmt(stats.spent)} · Remaining: ${fmt(stats.remaining)}</p>
+      <p>Carry-over: ${fmt(stats.carry)} · Deposits: ${fmt(stats.deposits)} · Income: ${fmt(stats.income)} · Spent: ${fmt(stats.spent)} · Transaction costs: ${fmt(stats.fees)} · Remaining: ${fmt(stats.remaining)}</p>
       <h2>Allocations</h2>${tbl(["Group", "Sub-category", "Share", "Allocated", "Spent", "Left"], alloc)}
-      <h2>Transactions</h2>${tbl(["Date", "Type", "Sub-category", "Note", "Amount"], tx)}</body></html>`);
+      <h2>Transactions</h2>${tbl(["Date", "Type", "Sub-category", "Note", "Amount", "Transaction Cost", "Account Balance"], tx)}</body></html>`);
     w.document.close(); w.focus(); w.print();
   };
 
@@ -123,7 +132,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
   const colors = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)"];
 
   return (
-    <div className="min-h-screen bg-background pb-16">
+    <div className="min-h-screen pb-16">
       <header className="border-b border-border">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-6 py-4">
           <div><p className="text-xs uppercase tracking-[0.3em] text-primary">Ledger</p><h1 className="font-display text-2xl font-bold">Hi, {USER}</h1></div>
@@ -144,13 +153,15 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
           <div className="ml-auto flex gap-2">
             <button onClick={downloadCSV} className={ghost}>Download CSV</button>
             <button onClick={downloadPDF} className={ghost}>Download PDF</button>
+            <button onClick={() => { if (window.confirm("Reset everything? This permanently deletes all deposits and expenses.")) { setTxs([]); setFrom(""); setTo(""); setMonth(today().slice(0, 7)); } }} className="rounded-lg border border-destructive/60 bg-destructive/15 px-3 py-2 text-sm font-semibold text-destructive hover:bg-destructive/25">Reset</button>
           </div>
         </div>
 
-        <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
           <Stat label="Carried over" value={stats.carry} hint="From previous months" />
           <Stat label="Total Income" value={stats.income} hint={`Deposits ${fmt(stats.deposits)}`} />
           <Stat label="Total Spent" value={stats.spent} />
+          <Stat label="Transaction Costs" value={stats.fees} hint="Fees & charges this month" />
           <div className={`rounded-2xl border p-5 ${low ? "border-destructive bg-destructive/15" : "border-border bg-card"}`}>
             <p className="text-sm text-muted-foreground">Remaining Balance</p>
             <p className={`mt-2 font-display text-3xl font-bold ${low ? "text-destructive" : "text-success"}`}>{fmt(stats.remaining)}</p>
@@ -215,7 +226,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
           </div>
           <div className="mt-4 overflow-x-auto">
             <table className="w-full text-sm">
-              <thead><tr className="border-b border-border text-left text-muted-foreground"><th className="py-2">Date</th><th>Type</th><th>Sub-category</th><th>Note</th><th className="text-right">Amount</th><th /></tr></thead>
+              <thead><tr className="border-b border-border text-left text-muted-foreground"><th className="py-2">Date</th><th>Type</th><th>Sub-category</th><th>Note</th><th className="text-right">Amount</th><th className="text-right">Transaction Cost</th><th className="text-right">Account Balance</th><th /></tr></thead>
               <tbody>
                 {history.map((t) => (
                   <tr key={t.id} className="border-b border-border/60">
@@ -224,10 +235,12 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
                     <td>{t.type === "deposit" ? "Auto 50/20/30" : subName(t.sub)}</td>
                     <td className="text-muted-foreground">{t.note}</td>
                     <td className={`text-right font-semibold ${t.type === "deposit" ? "text-success" : ""}`}>{t.type === "deposit" ? "+" : "−"}{fmt(t.amount)}</td>
+                    <td className="text-right text-muted-foreground">{feeOf(t) ? `−${fmt(feeOf(t))}` : "—"}</td>
+                    <td className={`text-right font-semibold ${(balances.get(t.id) ?? 0) < 0 ? "text-destructive" : "text-primary"}`}>{fmt(balances.get(t.id) ?? 0)}</td>
                     <td className="text-right"><button onClick={() => setTxs((x) => x.filter((y) => y.id !== t.id))} className="text-muted-foreground hover:text-destructive" aria-label="Delete">✕</button></td>
                   </tr>
                 ))}
-                {!history.length && <tr><td colSpan={6} className="py-10 text-center text-muted-foreground">No transactions yet — make a deposit to get started.</td></tr>}
+                {!history.length && <tr><td colSpan={8} className="py-10 text-center text-muted-foreground">No transactions yet — make a deposit to get started.</td></tr>}
               </tbody>
             </table>
           </div>
@@ -253,11 +266,13 @@ function Stat({ label, value, hint }: { label: string; value: number; hint?: str
 }
 
 function TxModal({ kind, defaultDate, onClose, onSave }: { kind: "deposit" | "expense"; defaultDate: string; onClose: () => void; onSave: (t: Omit<Tx, "id">) => void }) {
-  const [amount, setAmount] = useState(""); const [sub, setSub] = useState<string>(SUBS[0]!.id); const [note, setNote] = useState(""); const [date, setDate] = useState(defaultDate);
+  const [amount, setAmount] = useState(""); const [sub, setSub] = useState<string>(SUBS[0]!.id); const [note, setNote] = useState(""); const [date, setDate] = useState(defaultDate); const [fee, setFee] = useState("");
+  const f = parseFloat(fee) || 0;
+  useEffect(() => { const k = (e: KeyboardEvent) => e.key === "Escape" && onClose(); window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); }, [onClose]);
   const n = parseFloat(amount);
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 px-4 backdrop-blur-sm" onClick={onClose}>
-      <form onClick={(e) => e.stopPropagation()} onSubmit={(e) => { e.preventDefault(); if (n > 0) onSave({ type: kind, amount: n, ...(kind === "expense" ? { sub } : {}), note, date }); }}
+      <form onClick={(e) => e.stopPropagation()} onSubmit={(e) => { e.preventDefault(); if (n > 0 && f >= 0 && date) onSave({ type: kind, amount: Math.round(n * 100) / 100, fee: Math.round(f * 100) / 100, ...(kind === "expense" ? { sub } : {}), note, date }); }}
         className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl">
         <h2 className="font-display text-2xl font-bold">{kind === "deposit" ? "New deposit" : "Add expense"}</h2>
         <label className="mt-4 block text-sm text-muted-foreground">Amount<input type="number" step="0.01" min="0" autoFocus value={amount} onChange={(e) => setAmount(e.target.value)} className={inputCls} /></label>
@@ -267,6 +282,7 @@ function TxModal({ kind, defaultDate, onClose, onSave }: { kind: "deposit" | "ex
               {GROUPS.map((g) => <optgroup key={g.id} label={g.name}>{g.subs.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</optgroup>)}
             </select></label>
         )}
+        <label className="mt-3 block text-sm text-muted-foreground">Transaction cost (fees/charges)<input type="number" step="0.01" min="0" value={fee} onChange={(e) => setFee(e.target.value)} className={inputCls} placeholder="0.00" /></label>
         <label className="mt-3 block text-sm text-muted-foreground">Date<input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputCls} /></label>
         <label className="mt-3 block text-sm text-muted-foreground">Note<input value={note} onChange={(e) => setNote(e.target.value)} className={inputCls} placeholder={kind === "deposit" ? "Salary" : "Groceries"} /></label>
         {kind === "deposit" && n > 0 && (
