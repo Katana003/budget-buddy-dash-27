@@ -253,11 +253,11 @@ function Stat({ label, value, hint }: { label: string; value: number; hint?: str
 }
 
 function TxModal({ kind, defaultDate, onClose, onSave }: { kind: "deposit" | "expense"; defaultDate: string; onClose: () => void; onSave: (t: Omit<Tx, "id">) => void }) {
-  const [amount, setAmount] = useState(""); const [sub, setSub] = useState(SUBS[0].id); const [note, setNote] = useState(""); const [date, setDate] = useState(defaultDate);
+  const [amount, setAmount] = useState(""); const [sub, setSub] = useState<string>(SUBS[0]!.id); const [note, setNote] = useState(""); const [date, setDate] = useState(defaultDate);
   const n = parseFloat(amount);
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 px-4 backdrop-blur-sm" onClick={onClose}>
-      <form onClick={(e) => e.stopPropagation()} onSubmit={(e) => { e.preventDefault(); if (n > 0) onSave({ type: kind, amount: n, sub: kind === "expense" ? sub : undefined, note, date }); }}
+      <form onClick={(e) => e.stopPropagation()} onSubmit={(e) => { e.preventDefault(); if (n > 0) onSave({ type: kind, amount: n, ...(kind === "expense" ? { sub } : {}), note, date }); }}
         className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl">
         <h2 className="font-display text-2xl font-bold">{kind === "deposit" ? "New deposit" : "Add expense"}</h2>
         <label className="mt-4 block text-sm text-muted-foreground">Amount<input type="number" step="0.01" min="0" autoFocus value={amount} onChange={(e) => setAmount(e.target.value)} className={inputCls} /></label>
