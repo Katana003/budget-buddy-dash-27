@@ -67,19 +67,19 @@
 
 :root {
   --radius: 0.875rem;
-  --background: oklch(0.27 0.07 285);
+  --background: oklch(0.14 0.003 85);
   --foreground: oklch(0.96 0.005 90);
-  --card: oklch(0.33 0.08 290);
+  --card: oklch(0.205 0.005 85);
   --card-foreground: oklch(0.96 0.005 90);
-  --popover: oklch(0.34 0.08 290);
+  --popover: oklch(0.22 0.005 85);
   --popover-foreground: oklch(0.96 0.005 90);
   --primary: oklch(0.82 0.13 85);
   --primary-foreground: oklch(0.18 0.02 80);
-  --secondary: oklch(0.38 0.08 290);
+  --secondary: oklch(0.255 0.007 85);
   --secondary-foreground: oklch(0.96 0.005 90);
-  --muted: oklch(0.24 0.06 285);
-  --muted-foreground: oklch(0.8 0.04 300);
-  --accent: oklch(0.43 0.09 290);
+  --muted: oklch(0.17 0.004 85);
+  --muted-foreground: oklch(0.72 0.015 85);
+  --accent: oklch(0.31 0.018 85);
   --accent-foreground: oklch(0.96 0.005 90);
   --destructive: oklch(0.7 0.2 22);
   --destructive-foreground: oklch(0.98 0 0);
@@ -88,16 +88,16 @@
   --border: oklch(0.85 0.1 85 / 18%);
   --input: oklch(1 0 0 / 12%);
   --ring: oklch(0.82 0.13 85);
-  --chart-1: oklch(0.75 0.13 200);
-  --chart-2: oklch(0.72 0.17 350);
+  --chart-1: oklch(0.79 0.12 85);
+  --chart-2: oklch(0.72 0.04 85);
   --chart-3: oklch(0.72 0.17 152);
   --chart-4: oklch(0.82 0.13 85);
   --chart-5: oklch(0.64 0.22 25);
-  --sidebar: oklch(0.33 0.08 290);
+  --sidebar: oklch(0.205 0.005 85);
   --sidebar-foreground: oklch(0.96 0.005 90);
   --sidebar-primary: oklch(0.82 0.13 85);
   --sidebar-primary-foreground: oklch(0.18 0.02 80);
-  --sidebar-accent: oklch(0.27 0.015 260);
+  --sidebar-accent: oklch(0.25 0.008 85);
   --sidebar-accent-foreground: oklch(0.96 0.005 90);
   --sidebar-border: oklch(1 0 0 / 9%);
   --sidebar-ring: oklch(0.82 0.13 85);
@@ -110,8 +110,6 @@
 
   body {
     background-color: var(--color-background);
-    background-image: radial-gradient(ellipse at top left, oklch(0.4 0.1 300 / 60%), transparent 55%), radial-gradient(ellipse at bottom right, oklch(0.38 0.08 170 / 45%), transparent 55%);
-    background-attachment: fixed;
     font-family: var(--font-sans);
     color: var(--color-foreground);
   }

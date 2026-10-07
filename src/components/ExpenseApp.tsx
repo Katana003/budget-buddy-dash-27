@@ -1,3 +1,6 @@
+import { Button } from "@/components/ui/button";
+import { ArrowRightLeft, Pencil } from "lucide-react";
+import { allocatedTo, calculateLedger, feeOf, isTransaction, money, type Tx } from "@/lib/ledger";
 import { useEffect, useMemo, useState } from "react";
 import {
   PieChart,
@@ -55,16 +58,6 @@ const GROUPS = [
 const SUBS = GROUPS.flatMap((g) => g.subs.map((s) => ({ ...s, group: g.name })));
 const subName = (id?: string) => SUBS.find((s) => s.id === id)?.name ?? "—";
 
-type Tx = {
-  id: string;
-  type: "deposit" | "expense";
-  amount: number;
-  sub?: string;
-  note: string;
-  date: string;
-  fee?: number;
-};
-const feeOf = (t: Tx) => (Number.isFinite(t.fee) ? (t.fee as number) : 0);
 const newId = () =>
   typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID()
@@ -79,7 +72,7 @@ const monthLabel = (m: string) =>
 const shiftMonth = (m: string, n: number) => {
   const d = new Date(m + "-01T00:00:00");
   d.setMonth(d.getMonth() + n);
-  return d.toISOString().slice(0, 7);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 };
 
 export function ExpenseApp() {
@@ -144,9 +137,9 @@ function Login({ onLogin }: { onLogin: () => void }) {
           />
         </label>
         {err && <p className="mt-3 text-sm text-destructive">{err}</p>}
-        <button className="mt-6 w-full rounded-lg bg-primary py-2.5 font-semibold text-primary-foreground hover:opacity-90">
+        <Button className="mt-6 w-full rounded-lg bg-primary py-2.5 font-semibold text-primary-foreground hover:opacity-90">
           Sign in
-        </button>
+        </Button>
       </form>
     </div>
   );
@@ -159,7 +152,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
   const [txs, setTxs] = useState<Tx[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [month, setMonth] = useState(() => today().slice(0, 7));
-  const [modal, setModal] = useState<null | "deposit" | "expense">(null);
+  const [modal, setModal] = useState<null | "deposit" | "expense" | "transfer" | "carryover">(null);
   const [charts, setCharts] = useState(false);
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -168,7 +161,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
     try {
       const v = JSON.parse(localStorage.getItem(DATA_KEY) || "[]");
       if (Array.isArray(v))
-        setTxs(v.filter((t) => t && typeof t.amount === "number" && typeof t.date === "string"));
+        setTxs(v.filter(isTransaction));
     } catch {
       /* ignore corrupt data */
     }
@@ -178,46 +171,23 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
     if (loaded) localStorage.setItem(DATA_KEY, JSON.stringify(txs));
   }, [txs, loaded]);
 
-  // Carry-over: remaining balance of every earlier month rolls into the next.
-  const stats = useMemo(() => {
-    const months = Array.from(new Set([...txs.map((t) => monthOf(t.date)), month])).sort();
-    let carry = 0;
-    let result = { carry: 0, deposits: 0, income: 0, spent: 0, fees: 0, remaining: 0 };
-    for (const m of months) {
-      if (m > month) break;
-      const mt = txs.filter((t) => monthOf(t.date) === m);
-      const deposits = mt.filter((t) => t.type === "deposit").reduce((a, t) => a + t.amount, 0);
-      const spent = mt.filter((t) => t.type === "expense").reduce((a, t) => a + t.amount, 0);
-      const fees = mt.reduce((a, t) => a + feeOf(t), 0);
-      const income = carry + deposits;
-      result = { carry, deposits, income, spent, fees, remaining: income - spent - fees };
-      carry = Math.max(0, income - spent - fees);
-    }
-    return result;
-  }, [txs, month]);
-
+  const { stats, balances } = useMemo(() => calculateLedger(txs, month), [txs, month]);
   const monthTx = txs.filter((t) => monthOf(t.date) === month);
-  const spentBy = (sub: string) =>
-    monthTx.filter((t) => t.type === "expense" && t.sub === sub).reduce((a, t) => a + t.amount, 0);
-  // Running account balance: money actually in the account after each transaction and its cost.
-  const balances = useMemo(() => {
-    const m = new Map<string, number>();
-    let bal = 0;
-    [...txs]
-      .sort((a, b) => a.date.localeCompare(b.date))
-      .forEach((t) => {
-        bal += (t.type === "deposit" ? t.amount : -t.amount) - feeOf(t);
-        m.set(t.id, bal);
-      });
-    return m;
-  }, [txs]);
+  const spentBy = (sub: string) => money(
+    monthTx.filter((t) => t.type === "expense" && t.sub === sub).reduce((a, t) => a + t.amount, 0));
+  const allocation = (sub: string, pct: number) => allocatedTo(txs, month, stats.income, sub, pct);
+  const available = (sub: string) => {
+    const category = SUBS.find(s => s.id === sub);
+    return category ? money(allocation(sub, category.pct) - spentBy(sub)) : 0;
+  };
+  const categoryLabel = (t: Tx) => t.type === "deposit" ? "Auto 50/20/30" : t.type === "carryover" ? "Opening balance" : t.type === "transfer" ? `${subName(t.sub)} → ${subName(t.toSub)}` : subName(t.sub);
   const history = [...txs]
     .filter((t) => (!from || t.date >= from) && (!to || t.date <= to))
     .sort((a, b) => b.date.localeCompare(a.date));
   const low = stats.remaining < 200;
 
   const add = (t: Omit<Tx, "id">) => {
-    setTxs((x) => [...x, { ...t, id: newId() }]);
+    setTxs((x) => [...x.filter(old => t.type !== "carryover" || old.type !== "carryover" || monthOf(old.date) !== monthOf(t.date)), { ...t, id: newId() }]);
     setModal(null);
   };
 
@@ -226,16 +196,16 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
       s.group,
       s.name,
       `${s.pct}%`,
-      fmt((stats.income * s.pct) / 100),
+      fmt(allocation(s.id, s.pct)),
       fmt(spentBy(s.id)),
-      fmt((stats.income * s.pct) / 100 - spentBy(s.id)),
+      fmt(allocation(s.id, s.pct) - spentBy(s.id)),
     ]);
     const tx = [...monthTx]
       .sort((a, b) => a.date.localeCompare(b.date))
       .map((t) => [
         t.date,
         t.type,
-        subName(t.sub),
+        categoryLabel(t),
         t.note,
         fmt(t.amount),
         fmt(feeOf(t)),
@@ -288,7 +258,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
   );
   const barData = GROUPS.map((g) => ({
     name: g.name,
-    Allocated: (stats.income * g.pct) / 100,
+    Allocated: g.subs.reduce((sum, s) => sum + allocation(s.id, s.pct), 0),
     Spent: g.subs.reduce((a, s) => a + spentBy(s.id), 0),
   }));
   const colors = [
@@ -308,49 +278,52 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
             <h1 className="font-display text-2xl font-bold">Hi, {USER}</h1>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={() => setMonth(shiftMonth(month, -1))} className={ghost}>
+            <Button onClick={() => setMonth(shiftMonth(month, -1))} className={ghost}>
               ‹
-            </button>
+            </Button>
             <span className="min-w-36 text-center font-medium">{monthLabel(month)}</span>
-            <button onClick={() => setMonth(shiftMonth(month, 1))} className={ghost}>
+            <Button onClick={() => setMonth(shiftMonth(month, 1))} className={ghost}>
               ›
-            </button>
-            <button onClick={onLogout} className={ghost}>
+            </Button>
+            <Button onClick={onLogout} className={ghost}>
               Log out
-            </button>
+            </Button>
           </div>
         </div>
       </header>
 
       <main className="mx-auto max-w-7xl space-y-8 px-6 pt-8">
         <div className="flex flex-wrap gap-3">
-          <button
+          <Button
             onClick={() => setModal("deposit")}
             className="rounded-xl bg-success px-6 py-3 text-lg font-bold text-success-foreground shadow-lg hover:opacity-90"
           >
             + Deposit
-          </button>
-          <button
+          </Button>
+          <Button
             onClick={() => setModal("expense")}
             className="rounded-xl bg-primary px-5 py-3 font-semibold text-primary-foreground hover:opacity-90"
           >
             Add Expense
-          </button>
-          <button onClick={() => setCharts(!charts)} className={ghost}>
+          </Button>
+          <Button variant="secondary" onClick={() => setModal("transfer")} className={ghost}>
+            <ArrowRightLeft /> Transfer budget
+          </Button>
+          <Button onClick={() => setCharts(!charts)} className={ghost}>
             {charts ? "Hide charts" : "View charts"}
-          </button>
+          </Button>
           <div className="ml-auto flex gap-2">
-            <button onClick={downloadCSV} className={ghost}>
+            <Button onClick={downloadCSV} className={ghost}>
               Download CSV
-            </button>
-            <button onClick={downloadPDF} className={ghost}>
+            </Button>
+            <Button onClick={downloadPDF} className={ghost}>
               Download PDF
-            </button>
-            <button
+            </Button>
+            <Button
               onClick={() => {
                 if (
                   window.confirm(
-                    "Reset everything? This permanently deletes all deposits and expenses.",
+                    "Reset everything? This permanently deletes all deposits, expenses, budget transfers and manual carry-over balances.",
                   )
                 ) {
                   setTxs([]);
@@ -362,12 +335,17 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
               className="rounded-lg border border-destructive/60 bg-destructive/15 px-3 py-2 text-sm font-semibold text-destructive hover:bg-destructive/25"
             >
               Reset
-            </button>
+            </Button>
           </div>
         </div>
 
         <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-          <Stat label="Carried over" value={stats.carry} hint="From previous months" />
+          <div className="relative rounded-2xl border border-border bg-card p-5">
+            <p className="text-sm text-muted-foreground">Carried over</p>
+            <p className="mt-2 font-display text-3xl font-bold">{fmt(stats.carry)}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{stats.manualCarry ? "Manual opening balance" : "From previous months"}</p>
+            <Button variant="ghost" size="icon" className="absolute right-2 top-2 text-primary" aria-label="Edit carry-over" title="Edit carry-over" onClick={() => setModal("carryover")}><Pencil /></Button>
+          </div>
           <Stat
             label="Total Income"
             value={stats.income}
@@ -437,7 +415,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
 
         <section className="grid gap-4 lg:grid-cols-3">
           {GROUPS.map((g) => {
-            const total = (stats.income * g.pct) / 100;
+            const total = money(g.subs.reduce((sum, s) => sum + allocation(s.id, s.pct), 0));
             const spent = g.subs.reduce((a, s) => a + spentBy(s.id), 0);
             return (
               <div
@@ -455,9 +433,9 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
                 </p>
                 <div className="mt-4 space-y-4">
                   {g.subs.map((s) => {
-                    const a = (stats.income * s.pct) / 100;
+                    const a = allocation(s.id, s.pct);
                     const sp = spentBy(s.id);
-                    const pct = a ? Math.min(100, (sp / a) * 100) : 0;
+                    const pct = a > 0 ? Math.max(0, Math.min(100, (sp / a) * 100)) : sp > 0 ? 100 : 0;
                     const over = sp > a;
                     return (
                       <div key={s.id}>
@@ -511,7 +489,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
                   className={inputCls}
                 />
               </label>
-              <button
+              <Button
                 onClick={() => {
                   setFrom("");
                   setTo("");
@@ -519,7 +497,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
                 className={ghost}
               >
                 Clear
-              </button>
+              </Button>
             </div>
           </div>
           <div className="mt-4 overflow-x-auto">
@@ -542,17 +520,17 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
                     <td className="py-2.5">{t.date}</td>
                     <td>
                       <span
-                        className={`rounded-full px-2 py-0.5 text-xs font-semibold ${t.type === "deposit" ? "bg-success/20 text-success" : "bg-destructive/20 text-destructive"}`}
+                        className={`rounded-full px-2 py-0.5 text-xs font-semibold ${t.type === "deposit" ? "bg-success/20 text-success" : t.type === "expense" ? "bg-destructive/20 text-destructive" : "bg-primary/15 text-primary"}`}
                       >
                         {t.type}
                       </span>
                     </td>
-                    <td>{t.type === "deposit" ? "Auto 50/20/30" : subName(t.sub)}</td>
+                    <td>{categoryLabel(t)}</td>
                     <td className="text-muted-foreground">{t.note}</td>
                     <td
                       className={`text-right font-semibold ${t.type === "deposit" ? "text-success" : ""}`}
                     >
-                      {t.type === "deposit" ? "+" : "−"}
+                      {t.type === "deposit" ? "+" : t.type === "expense" ? "−" : ""}
                       {fmt(t.amount)}
                     </td>
                     <td className="text-right text-muted-foreground">
@@ -564,13 +542,13 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
                       {fmt(balances.get(t.id) ?? 0)}
                     </td>
                     <td className="text-right">
-                      <button
+                      <Button
                         onClick={() => setTxs((x) => x.filter((y) => y.id !== t.id))}
                         className="text-muted-foreground hover:text-destructive"
                         aria-label="Delete"
                       >
                         ✕
-                      </button>
+                      </Button>
                     </td>
                   </tr>
                 ))}
@@ -587,7 +565,12 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
         </section>
       </main>
 
-      {modal && (
+      {(modal === "transfer" || modal === "carryover") && (
+        <AdjustmentModal kind={modal} month={month} carry={stats.carry} automaticCarry={stats.automaticCarry}
+          manualCarry={stats.manualCarry} available={available} onClose={() => setModal(null)} onSave={add}
+          onAutomatic={() => { setTxs(x => x.filter(t => t.type !== "carryover" || monthOf(t.date) !== month)); setModal(null); }} />
+      )}
+      {(modal === "deposit" || modal === "expense") && (
         <TxModal
           kind={modal}
           defaultDate={month === today().slice(0, 7) ? today() : month + "-01"}
@@ -629,7 +612,7 @@ function TxModal({
   onSave: (t: Omit<Tx, "id">) => void;
 }) {
   const [amount, setAmount] = useState("");
-  const [sub, setSub] = useState<string>(SUBS[0]!.id);
+  const [sub, setSub] = useState<string>(SUBS[0]?.id ?? "rent");
   const [note, setNote] = useState("");
   const [date, setDate] = useState(defaultDate);
   const [fee, setFee] = useState("");
@@ -642,14 +625,14 @@ function TxModal({
   const n = parseFloat(amount);
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 px-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-background/80 px-4 py-6 backdrop-blur-sm"
       onClick={onClose}
     >
       <form
         onClick={(e) => e.stopPropagation()}
         onSubmit={(e) => {
           e.preventDefault();
-          if (n > 0 && f >= 0 && date)
+          if (Number.isFinite(n) && n >= 0.01 && Number.isFinite(f) && f >= 0 && date)
             onSave({
               type: kind,
               amount: Math.round(n * 100) / 100,
@@ -659,7 +642,7 @@ function TxModal({
               date,
             });
         }}
-        className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl"
+        className="max-h-[90dvh] w-full max-w-md overflow-y-auto rounded-2xl border border-border bg-card p-6 shadow-2xl"
       >
         <h2 className="font-display text-2xl font-bold">
           {kind === "deposit" ? "New deposit" : "Add expense"}
@@ -735,14 +718,70 @@ function TxModal({
           </div>
         )}
         <div className="mt-6 flex justify-end gap-2">
-          <button type="button" onClick={onClose} className={ghost}>
+          <Button type="button" onClick={onClose} className={ghost}>
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
             className={`rounded-lg px-4 py-2 font-semibold ${kind === "deposit" ? "bg-success text-success-foreground" : "bg-primary text-primary-foreground"}`}
           >
             Save
-          </button>
+          </Button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function AdjustmentModal({ kind, month, carry, automaticCarry, manualCarry, available, onClose, onSave, onAutomatic }: {
+  kind: "transfer" | "carryover"; month: string; carry: number; automaticCarry: number;
+  manualCarry: boolean; available: (sub: string) => number; onClose: () => void;
+  onSave: (t: Omit<Tx, "id">) => void; onAutomatic: () => void;
+}) {
+  const [source, setSource] = useState("debt");
+  const [target, setTarget] = useState("mmf");
+  const [amount, setAmount] = useState(kind === "carryover" ? String(carry) : "");
+  const [note, setNote] = useState("");
+  const [error, setError] = useState("");
+  useEffect(() => {
+    const handle = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", handle);
+    return () => window.removeEventListener("keydown", handle);
+  }, [onClose]);
+  const transfer = kind === "transfer";
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-background/80 px-4 py-6 backdrop-blur-sm" onClick={onClose}>
+      <form role="dialog" aria-modal="true" aria-labelledby="adjustment-title" className="max-h-[90dvh] w-full max-w-md overflow-y-auto rounded-2xl border border-border bg-card p-6 shadow-2xl"
+        onClick={e => e.stopPropagation()} onSubmit={e => {
+          e.preventDefault();
+          const n = money(Number(amount));
+          if (!amount.trim() || !Number.isFinite(n) || n < (transfer ? 0.01 : 0)) { setError("Enter a valid amount."); return; }
+          if (transfer && (source === target || n > available(source))) { setError(source === target ? "Choose two different budgets." : "The amount exceeds the source budget’s available balance."); return; }
+          onSave({ type: kind, amount: n, date: month + "-01", note: note || (transfer ? "Budget reallocation" : "Manual opening balance"), ...(transfer ? { sub: source, toSub: target } : {}) });
+        }}>
+        <h2 id="adjustment-title" className="font-display text-2xl font-bold">{transfer ? "Transfer budget" : "Carry-over · " + monthLabel(month)}</h2>
+        {transfer && <>
+          <label className="mt-4 block text-sm text-muted-foreground">From budget
+            <select className={inputCls} value={source} onChange={e => { setSource(e.target.value); setError(""); }}>
+              {SUBS.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </label>
+          <p className="mt-2 text-sm text-primary">Available {fmt(available(source))}</p>
+          <label className="mt-3 block text-sm text-muted-foreground">To budget
+            <select className={inputCls} value={target} onChange={e => { setTarget(e.target.value); setError(""); }}>
+              {SUBS.filter(s => s.id !== source).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </label>
+        </>}
+        <label className="mt-4 block text-sm text-muted-foreground">{transfer ? "Amount to transfer" : "Opening balance from last month"}
+          <input className={inputCls} type="number" required min={transfer ? "0.01" : "0"} step="0.01" value={amount} onChange={e => { setAmount(e.target.value); setError(""); }} autoFocus />
+        </label>
+        {!transfer && <p className="mt-2 text-xs text-muted-foreground">Automatic carry-over: {fmt(automaticCarry)}</p>}
+        <label className="mt-3 block text-sm text-muted-foreground">Note<input className={inputCls} value={note} onChange={e => setNote(e.target.value)} /></label>
+        {error && <p role="alert" className="mt-3 text-sm text-destructive">{error}</p>}
+        <div className="mt-6 flex flex-wrap justify-end gap-2">
+          {!transfer && manualCarry && <Button type="button" variant="secondary" onClick={onAutomatic}>Use automatic</Button>}
+          <Button type="button" variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button type="submit">{transfer ? "Transfer" : "Save carry-over"}</Button>
         </div>
       </form>
     </div>
