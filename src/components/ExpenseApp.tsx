@@ -543,6 +543,8 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
                     </td>
                     <td className="text-right">
                       <Button
+                        variant="ghost"
+                        size="icon"
                         onClick={() => setTxs((x) => x.filter((y) => y.id !== t.id))}
                         className="text-muted-foreground hover:text-destructive"
                         aria-label="Delete"
@@ -582,7 +584,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
   );
 }
 
-const ghost = "rounded-lg border border-border bg-secondary px-3 py-2 text-sm hover:bg-accent";
+const ghost = "rounded-lg border border-border bg-secondary px-3 py-2 text-sm text-secondary-foreground hover:bg-accent";
 const tip = {
   background: "var(--popover)",
   border: "1px solid var(--border)",
@@ -756,7 +758,7 @@ function AdjustmentModal({ kind, month, carry, automaticCarry, manualCarry, avai
           const n = money(Number(amount));
           if (!amount.trim() || !Number.isFinite(n) || n < (transfer ? 0.01 : 0)) { setError("Enter a valid amount."); return; }
           if (transfer && (source === target || n > available(source))) { setError(source === target ? "Choose two different budgets." : "The amount exceeds the source budget’s available balance."); return; }
-          onSave({ type: kind, amount: n, date: month + "-01", note: note || (transfer ? "Budget reallocation" : "Manual opening balance"), ...(transfer ? { sub: source, toSub: target } : {}) });
+          onSave({ type: kind, amount: n, date: transfer && month === today().slice(0, 7) ? today() : month + "-01", note: note || (transfer ? "Budget reallocation" : "Manual opening balance"), ...(transfer ? { sub: source, toSub: target } : {}) });
         }}>
         <h2 id="adjustment-title" className="font-display text-2xl font-bold">{transfer ? "Transfer budget" : "Carry-over · " + monthLabel(month)}</h2>
         {transfer && <>
