@@ -584,7 +584,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
   );
 }
 
-const ghost = "rounded-lg border border-border bg-secondary px-3 py-2 text-sm text-secondary-foreground hover:bg-accent";
+const ghost = "rounded-lg border border-border bg-secondary! px-3 py-2 text-sm text-secondary-foreground! hover:bg-accent!";
 const tip = {
   background: "var(--popover)",
   border: "1px solid var(--border)",
