@@ -8,3 +8,6 @@
 > Commits you push to the connected branch sync back to Lovable and show up in
 > the editor, so keep the branch in a working state.
 <!-- LOVABLE:END -->
+
+- Keep ledger calculations in the browser-safe ledger module; shared calculations keep dashboard balances, transfers and reports consistent.
+- Store budget transfers and monthly opening-balance overrides alongside existing transaction records; overrides replace automatic carry-over and transfers never change account cash.
