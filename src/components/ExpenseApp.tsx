@@ -155,6 +155,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
   const [loaded, setLoaded] = useState(false);
   const [month, setMonth] = useState(() => today().slice(0, 7));
   const [modal, setModal] = useState<null | "deposit" | "expense" | "transfer" | "carryover">(null);
+  const [editing, setEditing] = useState<Tx | null>(null);
   const [charts, setCharts] = useState(false);
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
