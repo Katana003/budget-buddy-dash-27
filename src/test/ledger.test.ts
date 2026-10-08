@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { allocatedTo, calculateLedger, isTransaction, type Tx } from "../lib/ledger";
+import { allocatedTo, calculateLedger, isTransaction, spentFrom, type Tx } from "../lib/ledger";
 
 const deposit: Tx = { id: "d", type: "deposit", amount: 1000, date: "2026-09-01", note: "", fee: 10 };
 describe("Ledger adjustments", () => {
@@ -27,5 +27,22 @@ describe("Ledger adjustments", () => {
     expect(calculateLedger(txs, "2026-10").stats.carry).toBe(0);
     expect(isTransaction({ ...deposit, amount: Infinity })).toBe(false);
     expect(isTransaction(deposit)).toBe(true);
+  });
+});
+describe("Transfers out, fees and direct deposits", () => {
+  it("deducts out-transfers and transfer fees from cash and counts them as spent in target", () => {
+    const txs: Tx[] = [deposit, { id: "t", type: "transfer", amount: 100, sub: "debt", toSub: "mmf", out: true, fee: 2, date: "2026-09-02", note: "x" }];
+    const { stats } = calculateLedger(txs, "2026-09");
+    expect(stats.remaining).toBe(888);
+    expect(stats.moved).toBe(100);
+    expect(spentFrom(txs, "2026-09", "mmf")).toBe(100);
+  });
+  it("direct deposits skip the 50/20/30 split", () => {
+    const txs: Tx[] = [{ id: "d", type: "deposit", amount: 300, sub: "mmf", date: "2026-09-01", note: "" }, { id: "g", type: "deposit", amount: 500, group: "needs", date: "2026-09-01", note: "" }];
+    const { stats } = calculateLedger(txs, "2026-09");
+    expect(stats.income).toBe(800);
+    expect(stats.autoBase).toBe(0);
+    expect(allocatedTo(txs, "2026-09", stats.autoBase, "mmf", 15, { id: "savings", pct: 30 })).toBe(300);
+    expect(allocatedTo(txs, "2026-09", stats.autoBase, "rent", 25, { id: "needs", pct: 50 })).toBe(250);
   });
 });
