@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
-import { ArrowRightLeft, Pencil } from "lucide-react";
-import { allocatedTo, calculateLedger, feeOf, isTransaction, money, type Tx } from "@/lib/ledger";
+import { ArrowRightLeft, Pencil, Save, Undo2, Wand2 } from "lucide-react";
+import { allocatedTo, calculateLedger, feeOf, isTransaction, money, spentFrom, type Tx } from "@/lib/ledger";
 import { useEffect, useMemo, useState } from "react";
 import {
   PieChart,
@@ -19,6 +19,7 @@ const USER = "XhizoStrike";
 const PASS = "Timetable#2026";
 const AUTH_KEY = "ledger-auth";
 const DATA_KEY = "ledger-tx";
+const BACKUP_KEY = "ledger-tx-saved";
 
 // Sub-category shares are a percentage of the whole deposit (they sum to each group's share).
 const GROUPS = [
@@ -57,6 +58,7 @@ const GROUPS = [
 ];
 const SUBS = GROUPS.flatMap((g) => g.subs.map((s) => ({ ...s, group: g.name })));
 const subName = (id?: string) => SUBS.find((s) => s.id === id)?.name ?? "—";
+const groupOfSub = (id: string) => GROUPS.find((g) => g.subs.some((s) => s.id === id));
 
 const newId = () =>
   typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -156,31 +158,52 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
   const [charts, setCharts] = useState(false);
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+  const [savedAt, setSavedAt] = useState("");
 
   useEffect(() => {
-    try {
-      const v = JSON.parse(localStorage.getItem(DATA_KEY) || "[]");
-      if (Array.isArray(v))
-        setTxs(v.filter(isTransaction));
-    } catch {
-      /* ignore corrupt data */
-    }
+    const read = (key: string) => {
+      try {
+        const v = JSON.parse(localStorage.getItem(key) || "null");
+        return Array.isArray(v) ? v.filter(isTransaction) : null;
+      } catch {
+        return null; // ignore corrupt data
+      }
+    };
+    // Fall back to the last manual save if the live copy is missing or corrupt.
+    setTxs(read(DATA_KEY) ?? read(BACKUP_KEY) ?? []);
     setLoaded(true);
   }, []);
   useEffect(() => {
     if (loaded) localStorage.setItem(DATA_KEY, JSON.stringify(txs));
   }, [txs, loaded]);
+  const saveNow = () => {
+    const data = JSON.stringify(txs);
+    localStorage.setItem(DATA_KEY, data);
+    localStorage.setItem(BACKUP_KEY, data);
+    setSavedAt(new Date().toLocaleTimeString());
+  };
 
   const { stats, balances } = useMemo(() => calculateLedger(txs, month), [txs, month]);
   const monthTx = txs.filter((t) => monthOf(t.date) === month);
-  const spentBy = (sub: string) => money(
-    monthTx.filter((t) => t.type === "expense" && t.sub === sub).reduce((a, t) => a + t.amount, 0));
-  const allocation = (sub: string, pct: number) => allocatedTo(txs, month, stats.income, sub, pct);
+  const spentBy = (sub: string) => spentFrom(txs, month, sub);
+  const allocation = (sub: string, pct: number) => {
+    const g = groupOfSub(sub);
+    return allocatedTo(txs, month, stats.autoBase, sub, pct, g && { id: g.id, pct: g.pct });
+  };
   const available = (sub: string) => {
     const category = SUBS.find(s => s.id === sub);
     return category ? money(allocation(sub, category.pct) - spentBy(sub)) : 0;
   };
-  const categoryLabel = (t: Tx) => t.type === "deposit" ? "Auto 50/20/30" : t.type === "carryover" ? "Opening balance" : t.type === "transfer" ? `${subName(t.sub)} → ${subName(t.toSub)}` : subName(t.sub);
+  const categoryLabel = (t: Tx) => t.type === "deposit" ? (t.sub ? `Direct → ${subName(t.sub)}` : t.group ? `Direct → ${GROUPS.find(g => g.id === t.group)?.name ?? "—"}` : "Auto 50/20/30") : t.type === "carryover" ? "Opening balance" : t.type === "transfer" ? `${subName(t.sub)} → ${subName(t.toSub)}${t.out ? " (left account)" : ""}` : subName(t.sub);
+  const sweep = () => {
+    const date = month === today().slice(0, 7) ? today() : month + "-28";
+    const moves = SUBS.filter((s) => s.id !== "mmf" && s.id !== "sinking")
+      .map((s) => ({ s, left: available(s.id) })).filter((x) => x.left >= 0.01);
+    if (!moves.length) { window.alert("No unspent budget to sweep this month."); return; }
+    const total = money(moves.reduce((a, x) => a + x.left, 0));
+    if (!window.confirm(`Move ${fmt(total)} of unspent budget from ${moves.length} categories into MMF? (Budget only — your account cash does not change.)`)) return;
+    setTxs((x) => [...x, ...moves.map(({ s, left }) => ({ id: newId(), type: "transfer" as const, amount: left, sub: s.id, toSub: "mmf", note: "Month-end sweep of leftovers", date }))]);
+  };
   const history = [...txs]
     .filter((t) => (!from || t.date >= from) && (!to || t.date <= to))
     .sort((a, b) => b.date.localeCompare(a.date));
@@ -309,10 +332,17 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
           <Button variant="secondary" onClick={() => setModal("transfer")} className={ghost}>
             <ArrowRightLeft /> Transfer budget
           </Button>
+          <Button onClick={sweep} className={ghost} title="Move all unspent budget into MMF">
+            <Wand2 /> Sweep leftovers
+          </Button>
           <Button onClick={() => setCharts(!charts)} className={ghost}>
             {charts ? "Hide charts" : "View charts"}
           </Button>
-          <div className="ml-auto flex gap-2">
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            {savedAt && <span className="text-xs text-success">Saved {savedAt}</span>}
+            <Button onClick={saveNow} className="rounded-lg bg-success px-3 py-2 text-sm font-semibold text-success-foreground hover:opacity-90">
+              <Save /> Save
+            </Button>
             <Button onClick={downloadCSV} className={ghost}>
               Download CSV
             </Button>
@@ -327,6 +357,8 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
                   )
                 ) {
                   setTxs([]);
+                  localStorage.removeItem(BACKUP_KEY);
+                  setSavedAt("");
                   setFrom("");
                   setTo("");
                   setMonth(today().slice(0, 7));
@@ -351,7 +383,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
             value={stats.income}
             hint={`Deposits ${fmt(stats.deposits)}`}
           />
-          <Stat label="Total Spent" value={stats.spent} />
+          <Stat label="Total Spent" value={money(stats.spent + stats.moved)} hint={stats.moved ? `Incl. ${fmt(stats.moved)} sent out (e.g. MMF)` : undefined} />
           <Stat label="Transaction Costs" value={stats.fees} hint="Fees & charges this month" />
           <div
             className={`rounded-2xl border p-5 ${low ? "border-destructive bg-destructive/15" : "border-border bg-card"}`}
@@ -530,7 +562,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
                     <td
                       className={`text-right font-semibold ${t.type === "deposit" ? "text-success" : ""}`}
                     >
-                      {t.type === "deposit" ? "+" : t.type === "expense" ? "−" : ""}
+                      {t.type === "deposit" ? "+" : t.type === "expense" || t.out ? "−" : ""}
                       {fmt(t.amount)}
                     </td>
                     <td className="text-right text-muted-foreground">
@@ -541,11 +573,18 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
                     >
                       {fmt(balances.get(t.id) ?? 0)}
                     </td>
-                    <td className="text-right">
+                    <td className="whitespace-nowrap text-right">
+                      {t.type === "transfer" && (
+                        <Button variant="ghost" size="icon" aria-label="Undo transfer" title="Undo transfer"
+                          className="text-muted-foreground hover:text-primary"
+                          onClick={() => window.confirm("Undo this transfer? Budgets (and cash, if it left the account) go back to how they were.") && setTxs((x) => x.filter((y) => y.id !== t.id))}>
+                          <Undo2 />
+                        </Button>
+                      )}
                       <Button
                         variant="ghost"
                         size="icon"
-                        onClick={() => setTxs((x) => x.filter((y) => y.id !== t.id))}
+                        onClick={() => window.confirm("Delete this entry permanently?") && setTxs((x) => x.filter((y) => y.id !== t.id))}
                         className="text-muted-foreground hover:text-destructive"
                         aria-label="Delete"
                       >
@@ -618,6 +657,7 @@ function TxModal({
   const [note, setNote] = useState("");
   const [date, setDate] = useState(defaultDate);
   const [fee, setFee] = useState("");
+  const [target, setTarget] = useState("auto");
   const f = parseFloat(fee) || 0;
   useEffect(() => {
     const k = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -640,6 +680,8 @@ function TxModal({
               amount: Math.round(n * 100) / 100,
               fee: Math.round(f * 100) / 100,
               ...(kind === "expense" ? { sub } : {}),
+              ...(kind === "deposit" && target.startsWith("s:") ? { sub: target.slice(2) } : {}),
+              ...(kind === "deposit" && target.startsWith("g:") ? { group: target.slice(2) } : {}),
               note,
               date,
             });
@@ -661,6 +703,20 @@ function TxModal({
             className={inputCls}
           />
         </label>
+        {kind === "deposit" && (
+          <label className="mt-3 block text-sm text-muted-foreground">
+            Deposit to
+            <select value={target} onChange={(e) => setTarget(e.target.value)} className={inputCls}>
+              <option value="auto">Auto-split 50/20/30</option>
+              <optgroup label="Whole category">
+                {GROUPS.map((g) => <option key={g.id} value={`g:${g.id}`}>{g.name}</option>)}
+              </optgroup>
+              <optgroup label="Single budget">
+                {SUBS.map((s) => <option key={s.id} value={`s:${s.id}`}>{s.name}</option>)}
+              </optgroup>
+            </select>
+          </label>
+        )}
         {kind === "expense" && (
           <label className="mt-3 block text-sm text-muted-foreground">
             Sub-category
@@ -707,7 +763,10 @@ function TxModal({
             placeholder={kind === "deposit" ? "Salary" : "Groceries"}
           />
         </label>
-        {kind === "deposit" && n > 0 && (
+        {kind === "deposit" && target !== "auto" && n > 0 && (
+          <p className="mt-4 rounded-lg bg-muted p-3 text-xs">All {fmt(n)} goes to {target.startsWith("s:") ? subName(target.slice(2)) : GROUPS.find((g) => `g:${g.id}` === target)?.name} — no 50/20/30 split.</p>
+        )}
+        {kind === "deposit" && target === "auto" && n > 0 && (
           <div className="mt-4 space-y-1 rounded-lg bg-muted p-3 text-xs">
             {GROUPS.map((g) => (
               <div key={g.id} className="flex justify-between">
@@ -743,7 +802,10 @@ function AdjustmentModal({ kind, month, carry, automaticCarry, manualCarry, avai
   const [target, setTarget] = useState("mmf");
   const [amount, setAmount] = useState(kind === "carryover" ? String(carry) : "");
   const [note, setNote] = useState("");
+  const [fee, setFee] = useState("");
+  const [out, setOut] = useState(false);
   const [error, setError] = useState("");
+  const pastMonth = month < today().slice(0, 7);
   useEffect(() => {
     const handle = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", handle);
@@ -758,7 +820,10 @@ function AdjustmentModal({ kind, month, carry, automaticCarry, manualCarry, avai
           const n = money(Number(amount));
           if (!amount.trim() || !Number.isFinite(n) || n < (transfer ? 0.01 : 0)) { setError("Enter a valid amount."); return; }
           if (transfer && (source === target || n > available(source))) { setError(source === target ? "Choose two different budgets." : "The amount exceeds the source budget’s available balance."); return; }
-          onSave({ type: kind, amount: n, date: transfer && month === today().slice(0, 7) ? today() : month + "-01", note: note || (transfer ? "Budget reallocation" : "Manual opening balance"), ...(transfer ? { sub: source, toSub: target } : {}) });
+          const f = money(Number(fee) || 0);
+          if (transfer && (!Number.isFinite(f) || f < 0)) { setError("Enter a valid transaction cost."); return; }
+          if (transfer && !note.trim()) { setError("Add a reason so you remember why this money moved."); return; }
+          onSave({ type: kind, amount: n, date: transfer && month === today().slice(0, 7) ? today() : month + "-01", note: note.trim() || (transfer ? "Budget reallocation" : "Manual opening balance"), ...(transfer ? { sub: source, toSub: target, fee: f, out } : {}) });
         }}>
         <h2 id="adjustment-title" className="font-display text-2xl font-bold">{transfer ? "Transfer budget" : "Carry-over · " + monthLabel(month)}</h2>
         {transfer && <>
@@ -778,7 +843,17 @@ function AdjustmentModal({ kind, month, carry, automaticCarry, manualCarry, avai
           <input className={inputCls} type="number" required min={transfer ? "0.01" : "0"} step="0.01" value={amount} onChange={e => { setAmount(e.target.value); setError(""); }} autoFocus />
         </label>
         {!transfer && <p className="mt-2 text-xs text-muted-foreground">Automatic carry-over: {fmt(automaticCarry)}</p>}
-        <label className="mt-3 block text-sm text-muted-foreground">Note<input className={inputCls} value={note} onChange={e => setNote(e.target.value)} /></label>
+        {transfer && <>
+          <label className="mt-3 block text-sm text-muted-foreground">Transaction cost (fees/charges)
+            <input className={inputCls} type="number" min="0" step="0.01" placeholder="0.00" value={fee} onChange={e => { setFee(e.target.value); setError(""); }} />
+          </label>
+          <label className="mt-3 flex items-start gap-2 rounded-lg bg-muted p-3 text-sm">
+            <input type="checkbox" className="mt-1 accent-[var(--primary)]" checked={out} onChange={e => setOut(e.target.checked)} />
+            <span><span className="font-semibold">Money actually leaves my account</span><br /><span className="text-xs text-muted-foreground">Tick when you really sent it (e.g. to your MMF or to pay a debt). Leave unticked to only re-label the budget.</span></span>
+          </label>
+          {pastMonth && <p role="status" className="mt-3 rounded-lg border border-primary/40 bg-primary/10 p-2 text-xs text-primary">Heads up: you’re changing {monthLabel(month)}, a past month. Its report and the carry-over into later months may change.</p>}
+        </>}
+        <label className="mt-3 block text-sm text-muted-foreground">{transfer ? "Reason (required)" : "Note"}<input className={inputCls} value={note} onChange={e => { setNote(e.target.value); setError(""); }} placeholder={transfer ? "e.g. Friend still owes me, saving it instead" : ""} /></label>
         {error && <p role="alert" className="mt-3 text-sm text-destructive">{error}</p>}
         <div className="mt-6 flex flex-wrap justify-end gap-2">
           {!transfer && manualCarry && <Button type="button" variant="secondary" onClick={onAutomatic}>Use automatic</Button>}
