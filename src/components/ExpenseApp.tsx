@@ -631,7 +631,7 @@ const tip = {
   color: "var(--foreground)",
 };
 
-function Stat({ label, value, hint }: { label: string; value: number; hint?: string }) {
+function Stat({ label, value, hint }: { label: string; value: number; hint?: string | undefined }) {
   return (
     <div className="rounded-2xl border border-border bg-card p-5">
       <p className="text-sm text-muted-foreground">{label}</p>
