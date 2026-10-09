@@ -670,20 +670,22 @@ function Stat({ label, value, hint }: { label: string; value: number; hint?: str
 function TxModal({
   kind,
   defaultDate,
+  edit,
   onClose,
   onSave,
 }: {
   kind: "deposit" | "expense";
   defaultDate: string;
+  edit?: Tx | null;
   onClose: () => void;
   onSave: (t: Omit<Tx, "id">) => void;
 }) {
-  const [amount, setAmount] = useState("");
-  const [sub, setSub] = useState<string>(SUBS[0]?.id ?? "rent");
-  const [note, setNote] = useState("");
-  const [date, setDate] = useState(defaultDate);
-  const [fee, setFee] = useState("");
-  const [target, setTarget] = useState("auto");
+  const [amount, setAmount] = useState(edit ? String(edit.amount) : "");
+  const [sub, setSub] = useState<string>(edit?.sub ?? SUBS[0]?.id ?? "rent");
+  const [note, setNote] = useState(edit?.note ?? "");
+  const [date, setDate] = useState(edit?.date ?? defaultDate);
+  const [fee, setFee] = useState(edit?.fee ? String(edit.fee) : "");
+  const [target, setTarget] = useState(edit ? (edit.sub ? `s:${edit.sub}` : edit.group ? `g:${edit.group}` : "auto") : "auto");
   const f = parseFloat(fee) || 0;
   useEffect(() => {
     const k = (e: KeyboardEvent) => e.key === "Escape" && onClose();
