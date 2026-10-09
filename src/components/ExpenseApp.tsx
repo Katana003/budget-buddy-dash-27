@@ -628,15 +628,21 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
 
       {(modal === "transfer" || modal === "carryover") && (
         <AdjustmentModal kind={modal} month={month} carry={stats.carry} automaticCarry={stats.automaticCarry}
-          manualCarry={stats.manualCarry} available={available} onClose={() => setModal(null)} onSave={add}
-          onAutomatic={() => { setTxs(x => x.filter(t => t.type !== "carryover" || monthOf(t.date) !== month)); setModal(null); }} />
+          manualCarry={stats.manualCarry} available={available} edit={editing} onClose={closeModal}
+          onSave={editing ? (t) => update({ ...t, id: editing.id }) : add}
+          onAutomatic={() => {
+            const m = editing && editing.type === "carryover" ? monthOf(editing.date) : month;
+            setTxs(x => x.filter(t => t.type !== "carryover" || monthOf(t.date) !== m));
+            closeModal();
+          }} />
       )}
       {(modal === "deposit" || modal === "expense") && (
         <TxModal
           kind={modal}
           defaultDate={month === today().slice(0, 7) ? today() : month + "-01"}
-          onClose={() => setModal(null)}
-          onSave={add}
+          edit={editing}
+          onClose={closeModal}
+          onSave={editing ? (t) => update({ ...t, id: editing.id }) : add}
         />
       )}
     </div>
