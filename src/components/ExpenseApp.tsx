@@ -213,6 +213,20 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
   const add = (t: Omit<Tx, "id">) => {
     setTxs((x) => [...x.filter(old => t.type !== "carryover" || old.type !== "carryover" || monthOf(old.date) !== monthOf(t.date)), { ...t, id: newId() }]);
     setModal(null);
+    setEditing(null);
+  };
+  const update = (t: Tx) => {
+    setTxs((x) => [...x.filter(old => old.id !== t.id && (old.type !== "carryover" || t.type !== "carryover" || monthOf(old.date) !== monthOf(t.date))), t]);
+    setModal(null);
+    setEditing(null);
+  };
+  const closeModal = () => {
+    setModal(null);
+    setEditing(null);
+  };
+  const openEdit = (t: Tx) => {
+    setEditing(t);
+    setModal(t.type);
   };
 
   const reportRows = () => {
@@ -575,6 +589,11 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
                       {fmt(balances.get(t.id) ?? 0)}
                     </td>
                     <td className="whitespace-nowrap text-right">
+                      <Button variant="ghost" size="icon" aria-label="Edit entry" title="Edit entry"
+                        className="text-muted-foreground hover:text-primary"
+                        onClick={() => openEdit(t)}>
+                        <Pencil />
+                      </Button>
                       {t.type === "transfer" && (
                         <Button variant="ghost" size="icon" aria-label="Undo transfer" title="Undo transfer"
                           className="text-muted-foreground hover:text-primary"
@@ -609,15 +628,21 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
 
       {(modal === "transfer" || modal === "carryover") && (
         <AdjustmentModal kind={modal} month={month} carry={stats.carry} automaticCarry={stats.automaticCarry}
-          manualCarry={stats.manualCarry} available={available} onClose={() => setModal(null)} onSave={add}
-          onAutomatic={() => { setTxs(x => x.filter(t => t.type !== "carryover" || monthOf(t.date) !== month)); setModal(null); }} />
+          manualCarry={stats.manualCarry} available={available} edit={editing} onClose={closeModal}
+          onSave={editing ? (t) => update({ ...t, id: editing.id }) : add}
+          onAutomatic={() => {
+            const m = editing && editing.type === "carryover" ? monthOf(editing.date) : month;
+            setTxs(x => x.filter(t => t.type !== "carryover" || monthOf(t.date) !== m));
+            closeModal();
+          }} />
       )}
       {(modal === "deposit" || modal === "expense") && (
         <TxModal
           kind={modal}
           defaultDate={month === today().slice(0, 7) ? today() : month + "-01"}
-          onClose={() => setModal(null)}
-          onSave={add}
+          edit={editing}
+          onClose={closeModal}
+          onSave={editing ? (t) => update({ ...t, id: editing.id }) : add}
         />
       )}
     </div>
@@ -645,20 +670,22 @@ function Stat({ label, value, hint }: { label: string; value: number; hint?: str
 function TxModal({
   kind,
   defaultDate,
+  edit,
   onClose,
   onSave,
 }: {
   kind: "deposit" | "expense";
   defaultDate: string;
+  edit?: Tx | null;
   onClose: () => void;
   onSave: (t: Omit<Tx, "id">) => void;
 }) {
-  const [amount, setAmount] = useState("");
-  const [sub, setSub] = useState<string>(SUBS[0]?.id ?? "rent");
-  const [note, setNote] = useState("");
-  const [date, setDate] = useState(defaultDate);
-  const [fee, setFee] = useState("");
-  const [target, setTarget] = useState("auto");
+  const [amount, setAmount] = useState(edit ? String(edit.amount) : "");
+  const [sub, setSub] = useState<string>(edit?.sub ?? SUBS[0]?.id ?? "rent");
+  const [note, setNote] = useState(edit?.note ?? "");
+  const [date, setDate] = useState(edit?.date ?? defaultDate);
+  const [fee, setFee] = useState(edit?.fee ? String(edit.fee) : "");
+  const [target, setTarget] = useState(edit ? (edit.sub ? `s:${edit.sub}` : edit.group ? `g:${edit.group}` : "auto") : "auto");
   const f = parseFloat(fee) || 0;
   useEffect(() => {
     const k = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -690,7 +717,7 @@ function TxModal({
         className="max-h-[90dvh] w-full max-w-md overflow-y-auto rounded-2xl border border-border bg-card p-6 shadow-2xl"
       >
         <h2 className="font-display text-2xl font-bold">
-          {kind === "deposit" ? "New deposit" : "Add expense"}
+          {edit ? (kind === "deposit" ? "Edit deposit" : "Edit expense") : kind === "deposit" ? "New deposit" : "Add expense"}
         </h2>
         <label className="mt-4 block text-sm text-muted-foreground">
           Amount
@@ -786,7 +813,7 @@ function TxModal({
           <Button
             className={`rounded-lg px-4 py-2 font-semibold ${kind === "deposit" ? "bg-success text-success-foreground" : "bg-primary text-primary-foreground"}`}
           >
-            Save
+            {edit ? "Save changes" : "Save"}
           </Button>
         </div>
       </form>
@@ -794,19 +821,20 @@ function TxModal({
   );
 }
 
-function AdjustmentModal({ kind, month, carry, automaticCarry, manualCarry, available, onClose, onSave, onAutomatic }: {
+function AdjustmentModal({ kind, month, carry, automaticCarry, manualCarry, available, edit, onClose, onSave, onAutomatic }: {
   kind: "transfer" | "carryover"; month: string; carry: number; automaticCarry: number;
-  manualCarry: boolean; available: (sub: string) => number; onClose: () => void;
+  manualCarry: boolean; available: (sub: string) => number; edit?: Tx | null; onClose: () => void;
   onSave: (t: Omit<Tx, "id">) => void; onAutomatic: () => void;
 }) {
-  const [source, setSource] = useState("debt");
-  const [target, setTarget] = useState("mmf");
-  const [amount, setAmount] = useState(kind === "carryover" ? String(carry) : "");
-  const [note, setNote] = useState("");
-  const [fee, setFee] = useState("");
-  const [out, setOut] = useState(false);
+  const [source, setSource] = useState(edit?.sub ?? "debt");
+  const [target, setTarget] = useState(edit?.toSub ?? "mmf");
+  const [amount, setAmount] = useState(edit ? String(edit.amount) : kind === "carryover" ? String(carry) : "");
+  const [note, setNote] = useState(edit?.note ?? "");
+  const [fee, setFee] = useState(edit?.fee ? String(edit.fee) : "");
+  const [out, setOut] = useState(edit?.out ?? false);
   const [error, setError] = useState("");
-  const pastMonth = month < today().slice(0, 7);
+  const activeMonth = edit ? monthOf(edit.date) : month;
+  const pastMonth = activeMonth < today().slice(0, 7);
   useEffect(() => {
     const handle = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", handle);
@@ -820,20 +848,21 @@ function AdjustmentModal({ kind, month, carry, automaticCarry, manualCarry, avai
           e.preventDefault();
           const n = money(Number(amount));
           if (!amount.trim() || !Number.isFinite(n) || n < (transfer ? 0.01 : 0)) { setError("Enter a valid amount."); return; }
-          if (transfer && (source === target || n > available(source))) { setError(source === target ? "Choose two different budgets." : "The amount exceeds the source budget’s available balance."); return; }
+          const original = edit && edit.sub === source ? edit.amount : 0;
+          if (transfer && (source === target || n - original > available(source))) { setError(source === target ? "Choose two different budgets." : "The amount exceeds the source budget’s available balance."); return; }
           const f = money(Number(fee) || 0);
           if (transfer && (!Number.isFinite(f) || f < 0)) { setError("Enter a valid transaction cost."); return; }
           if (transfer && !note.trim()) { setError("Add a reason so you remember why this money moved."); return; }
-          onSave({ type: kind, amount: n, date: transfer && month === today().slice(0, 7) ? today() : month + "-01", note: note.trim() || (transfer ? "Budget reallocation" : "Manual opening balance"), ...(transfer ? { sub: source, toSub: target, fee: f, out } : {}) });
+          onSave({ type: kind, amount: n, date: edit ? edit.date : transfer && activeMonth === today().slice(0, 7) ? today() : activeMonth + "-01", note: note.trim() || (transfer ? "Budget reallocation" : "Manual opening balance"), ...(transfer ? { sub: source, toSub: target, fee: f, out } : {}) });
         }}>
-        <h2 id="adjustment-title" className="font-display text-2xl font-bold">{transfer ? "Transfer budget" : "Carry-over · " + monthLabel(month)}</h2>
+        <h2 id="adjustment-title" className="font-display text-2xl font-bold">{transfer ? (edit ? "Edit transfer" : "Transfer budget") : "Carry-over · " + monthLabel(activeMonth)}</h2>
         {transfer && <>
           <label className="mt-4 block text-sm text-muted-foreground">From budget
             <select className={inputCls} value={source} onChange={e => { setSource(e.target.value); setError(""); }}>
               {SUBS.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
           </label>
-          <p className="mt-2 text-sm text-primary">Available {fmt(available(source))}</p>
+          <p className="mt-2 text-sm text-primary">Available {fmt(available(source) + (edit && edit.sub === source ? edit.amount : 0))}</p>
           <label className="mt-3 block text-sm text-muted-foreground">To budget
             <select className={inputCls} value={target} onChange={e => { setTarget(e.target.value); setError(""); }}>
               {SUBS.filter(s => s.id !== source).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -852,7 +881,7 @@ function AdjustmentModal({ kind, month, carry, automaticCarry, manualCarry, avai
             <input type="checkbox" className="mt-1 accent-[var(--primary)]" checked={out} onChange={e => setOut(e.target.checked)} />
             <span><span className="font-semibold">Money actually leaves my account</span><br /><span className="text-xs text-muted-foreground">Tick when you really sent it (e.g. to your MMF or to pay a debt). Leave unticked to only re-label the budget.</span></span>
           </label>
-          {pastMonth && <p role="status" className="mt-3 rounded-lg border border-primary/40 bg-primary/10 p-2 text-xs text-primary">Heads up: you’re changing {monthLabel(month)}, a past month. Its report and the carry-over into later months may change.</p>}
+          {pastMonth && <p role="status" className="mt-3 rounded-lg border border-primary/40 bg-primary/10 p-2 text-xs text-primary">Heads up: you’re changing {monthLabel(activeMonth)}, a past month. Its report and the carry-over into later months may change.</p>}
         </>}
         <label className="mt-3 block text-sm text-muted-foreground">{transfer ? "Reason (required)" : "Note"}<input className={inputCls} value={note} onChange={e => { setNote(e.target.value); setError(""); }} placeholder={transfer ? "e.g. Friend still owes me, saving it instead" : ""} /></label>
         {error && <p role="alert" className="mt-3 text-sm text-destructive">{error}</p>}
