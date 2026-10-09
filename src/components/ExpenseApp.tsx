@@ -216,7 +216,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
     setEditing(null);
   };
   const update = (t: Tx) => {
-    setTxs((x) => [...x.filter(old => old.id === t.id || old.type !== "carryover" || t.type !== "carryover" || monthOf(old.date) !== monthOf(t.date)), t]);
+    setTxs((x) => [...x.filter(old => old.id !== t.id && (old.type !== "carryover" || t.type !== "carryover" || monthOf(old.date) !== monthOf(t.date))), t]);
     setModal(null);
     setEditing(null);
   };
