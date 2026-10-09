@@ -717,7 +717,7 @@ function TxModal({
         className="max-h-[90dvh] w-full max-w-md overflow-y-auto rounded-2xl border border-border bg-card p-6 shadow-2xl"
       >
         <h2 className="font-display text-2xl font-bold">
-          {kind === "deposit" ? "New deposit" : "Add expense"}
+          {edit ? (kind === "deposit" ? "Edit deposit" : "Edit expense") : kind === "deposit" ? "New deposit" : "Add expense"}
         </h2>
         <label className="mt-4 block text-sm text-muted-foreground">
           Amount
@@ -813,7 +813,7 @@ function TxModal({
           <Button
             className={`rounded-lg px-4 py-2 font-semibold ${kind === "deposit" ? "bg-success text-success-foreground" : "bg-primary text-primary-foreground"}`}
           >
-            Save
+            {edit ? "Save changes" : "Save"}
           </Button>
         </div>
       </form>
