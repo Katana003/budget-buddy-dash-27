@@ -213,6 +213,20 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
   const add = (t: Omit<Tx, "id">) => {
     setTxs((x) => [...x.filter(old => t.type !== "carryover" || old.type !== "carryover" || monthOf(old.date) !== monthOf(t.date)), { ...t, id: newId() }]);
     setModal(null);
+    setEditing(null);
+  };
+  const update = (t: Tx) => {
+    setTxs((x) => [...x.filter(old => old.id === t.id || old.type !== "carryover" || t.type !== "carryover" || monthOf(old.date) !== monthOf(t.date)), t]);
+    setModal(null);
+    setEditing(null);
+  };
+  const closeModal = () => {
+    setModal(null);
+    setEditing(null);
+  };
+  const openEdit = (t: Tx) => {
+    setEditing(t);
+    setModal(t.type);
   };
 
   const reportRows = () => {
@@ -575,6 +589,11 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
                       {fmt(balances.get(t.id) ?? 0)}
                     </td>
                     <td className="whitespace-nowrap text-right">
+                      <Button variant="ghost" size="icon" aria-label="Edit entry" title="Edit entry"
+                        className="text-muted-foreground hover:text-primary"
+                        onClick={() => openEdit(t)}>
+                        <Pencil />
+                      </Button>
                       {t.type === "transfer" && (
                         <Button variant="ghost" size="icon" aria-label="Undo transfer" title="Undo transfer"
                           className="text-muted-foreground hover:text-primary"
