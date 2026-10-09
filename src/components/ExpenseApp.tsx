@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { ArrowRightLeft, Pencil, Save, Undo2, Wand2 } from "lucide-react";
-import { allocatedTo, calculateLedger, feeOf, isTransaction, money, spentFrom, type Tx } from "@/lib/ledger";
+import { allocatedTo, calculateLedger, feeOf, isTransaction, money, overrideFor, spentFrom, type Tx } from "@/lib/ledger";
 import { useEffect, useMemo, useState } from "react";
 import {
   PieChart,
@@ -185,10 +185,22 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
   };
 
   const { stats, balances } = useMemo(() => calculateLedger(txs, month), [txs, month]);
-  const monthTx = txs.filter((t) => monthOf(t.date) === month);
+  const monthTx = txs.filter((t) => monthOf(t.date) === month && t.type !== "override");
   const spentBy = (sub: string) => spentFrom(txs, month, sub);
+  const ov = (key: string) => overrideFor(txs, month, key);
+  const editCard = (key: string, label: string, current: number) => {
+    const v = window.prompt(`Set ${label} for ${monthLabel(month)}.\nLeave empty to go back to the automatic figure.`, String(current));
+    if (v === null) return;
+    const rest = (x: Tx[]) => x.filter(t => !(t.type === "override" && t.sub === key && monthOf(t.date) === month));
+    if (v.trim() === "") { setTxs(x => rest(x)); return; }
+    const n = money(Number(v.replace(/,/g, "")));
+    if (!Number.isFinite(n) || n < 0) { window.alert("Please enter a valid amount (0 or more)."); return; }
+    setTxs(x => [...rest(x), { id: newId(), type: "override", sub: key, amount: n, note: `Manual ${label}`, date: month + "-01" }]);
+  };
   const allocation = (sub: string, pct: number) => {
     const g = groupOfSub(sub);
+    const manual = ov(sub);
+    if (manual !== undefined) return manual;
     return allocatedTo(txs, month, stats.autoBase, sub, pct, g && { id: g.id, pct: g.pct });
   };
   const available = (sub: string) => {
@@ -206,6 +218,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
     setTxs((x) => [...x, ...moves.map(({ s, left }) => ({ id: newId(), type: "transfer" as const, amount: left, sub: s.id, toSub: "mmf", note: "Month-end sweep of leftovers", date }))]);
   };
   const history = [...txs]
+    .filter((t) => t.type !== "override")
     .filter((t) => (!from || t.date >= from) && (!to || t.date <= to))
     .sort((a, b) => b.date.localeCompare(a.date));
   const low = stats.remaining < 200;
@@ -225,6 +238,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
     setEditing(null);
   };
   const openEdit = (t: Tx) => {
+    if (t.type === "override") return;
     setEditing(t);
     setModal(t.type);
   };
@@ -395,10 +409,12 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
           </div>
           <Stat
             label="Total Income"
-            value={stats.income}
-            hint={`Deposits ${fmt(stats.deposits)}`}
+            value={ov("income") ?? stats.income}
+            hint={ov("income") !== undefined ? "Manual figure" : stats.direct ? `Deposits ${fmt(stats.deposits)} · Direct ${fmt(stats.direct)}` : `Deposits ${fmt(stats.deposits)}`}
+            onEdit={() => editCard("income", "Total Income", ov("income") ?? stats.income)}
           />
-          <Stat label="Total Spent" value={money(stats.spent + stats.moved)} hint={stats.moved ? `Incl. ${fmt(stats.moved)} sent out (e.g. MMF)` : undefined} />
+          <Stat label="Total Spent" value={ov("spent") ?? money(stats.spent + stats.moved)} hint={ov("spent") !== undefined ? "Manual figure" : stats.moved ? `Incl. ${fmt(stats.moved)} sent out (e.g. MMF)` : undefined}
+            onEdit={() => editCard("spent", "Total Spent", ov("spent") ?? money(stats.spent + stats.moved))} />
           <Stat label="Transaction Costs" value={stats.fees} hint="Fees & charges this month" />
           <div
             className={`rounded-2xl border p-5 ${low ? "border-destructive bg-destructive/15" : "border-border bg-card"}`}
@@ -490,7 +506,11 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
                           <span>
                             {s.name} <span className="text-muted-foreground">({s.pct}%)</span>
                           </span>
-                          <span className="text-muted-foreground">{fmt(a)}</span>
+                          <span className="flex items-center gap-1 text-muted-foreground">
+                            {ov(s.id) !== undefined && <span className="text-xs text-primary">manual</span>}
+                            {fmt(a)}
+                            <button type="button" aria-label={`Edit ${s.name}`} title={`Edit ${s.name} amount`} className="rounded p-0.5 text-primary hover:bg-accent" onClick={() => editCard(s.id, s.name, a)}><Pencil className="h-3.5 w-3.5" /></button>
+                          </span>
                         </div>
                         <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-muted">
                           <div
@@ -657,9 +677,10 @@ const tip = {
   color: "var(--foreground)",
 };
 
-function Stat({ label, value, hint }: { label: string; value: number; hint?: string | undefined }) {
+function Stat({ label, value, hint, onEdit }: { label: string; value: number; hint?: string | undefined; onEdit?: () => void }) {
   return (
-    <div className="rounded-2xl border border-border bg-card p-5">
+    <div className="relative rounded-2xl border border-border bg-card p-5">
+      {onEdit && <Button variant="ghost" size="icon" className="absolute right-2 top-2 text-primary" aria-label={`Edit ${label}`} title={`Edit ${label}`} onClick={onEdit}><Pencil /></Button>}
       <p className="text-sm text-muted-foreground">{label}</p>
       <p className="mt-2 font-display text-3xl font-bold">{fmt(value)}</p>
       {hint && <p className="mt-1 text-xs text-muted-foreground">{hint}</p>}
