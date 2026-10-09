@@ -821,19 +821,20 @@ function TxModal({
   );
 }
 
-function AdjustmentModal({ kind, month, carry, automaticCarry, manualCarry, available, onClose, onSave, onAutomatic }: {
+function AdjustmentModal({ kind, month, carry, automaticCarry, manualCarry, available, edit, onClose, onSave, onAutomatic }: {
   kind: "transfer" | "carryover"; month: string; carry: number; automaticCarry: number;
-  manualCarry: boolean; available: (sub: string) => number; onClose: () => void;
+  manualCarry: boolean; available: (sub: string) => number; edit?: Tx | null; onClose: () => void;
   onSave: (t: Omit<Tx, "id">) => void; onAutomatic: () => void;
 }) {
-  const [source, setSource] = useState("debt");
-  const [target, setTarget] = useState("mmf");
-  const [amount, setAmount] = useState(kind === "carryover" ? String(carry) : "");
-  const [note, setNote] = useState("");
-  const [fee, setFee] = useState("");
-  const [out, setOut] = useState(false);
+  const [source, setSource] = useState(edit?.sub ?? "debt");
+  const [target, setTarget] = useState(edit?.toSub ?? "mmf");
+  const [amount, setAmount] = useState(edit ? String(edit.amount) : kind === "carryover" ? String(carry) : "");
+  const [note, setNote] = useState(edit?.note ?? "");
+  const [fee, setFee] = useState(edit?.fee ? String(edit.fee) : "");
+  const [out, setOut] = useState(edit?.out ?? false);
   const [error, setError] = useState("");
-  const pastMonth = month < today().slice(0, 7);
+  const activeMonth = edit ? monthOf(edit.date) : month;
+  const pastMonth = activeMonth < today().slice(0, 7);
   useEffect(() => {
     const handle = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", handle);
