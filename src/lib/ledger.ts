@@ -1,6 +1,7 @@
 export type Tx = {
   id: string;
-  type: "deposit" | "expense" | "transfer" | "carryover";
+  type: "deposit" | "expense" | "transfer" | "carryover" | "override";
+  /** override: sub holds the card key ("income", "spent" or a sub-category id) */
   amount: number;
   /** expense: category; transfer: source; deposit: direct-deposit sub-category */
   sub?: string;
@@ -31,7 +32,7 @@ export function calculateLedger(txs: Tx[], month: string) {
     let balance = carry;
     let deposits = 0, direct = 0, spent = 0, moved = 0, fees = 0;
     if (opening) balances.set(opening.id, carry);
-    for (const t of entries.filter(t => t.type !== "carryover").sort((a, b) => a.date.localeCompare(b.date))) {
+    for (const t of entries.filter(t => t.type !== "carryover" && t.type !== "override").sort((a, b) => a.date.localeCompare(b.date))) {
       let delta = 0;
       if (t.type === "deposit") { deposits = money(deposits + t.amount); if (isDirect(t)) direct = money(direct + t.amount); delta = t.amount; }
       if (t.type === "expense") { spent = money(spent + t.amount); delta = -t.amount; }
@@ -42,7 +43,7 @@ export function calculateLedger(txs: Tx[], month: string) {
       balances.set(t.id, balance);
     }
     closing = balance;
-    if (m === month) stats = { carry, automaticCarry, manualCarry: Boolean(opening), deposits, direct, autoBase: money(carry + deposits - direct), income: money(carry + deposits), spent, moved, fees, remaining: balance };
+    if (m === month) stats = { carry, automaticCarry, manualCarry: Boolean(opening), deposits, direct, autoBase: money(carry + deposits - direct), income: money(carry + deposits), spent, moved, fees, remaining: money(balance - direct) };
   }
   return { stats, balances };
 }
@@ -69,11 +70,16 @@ export function spentFrom(txs: Tx[], month: string, sub: string) {
 export function isTransaction(value: unknown): value is Tx {
   if (!value || typeof value !== "object") return false;
   const t = value as Partial<Tx>;
-  return typeof t.id === "string" && ["deposit", "expense", "transfer", "carryover"].includes(t.type ?? "")
+  return typeof t.id === "string" && ["deposit", "expense", "transfer", "carryover", "override"].includes(t.type ?? "")
     && typeof t.amount === "number" && Number.isFinite(t.amount) && t.amount >= 0
     && typeof t.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(t.date)
     && typeof t.note === "string" && (t.fee === undefined || (Number.isFinite(t.fee) && t.fee >= 0))
     && (t.out === undefined || typeof t.out === "boolean")
     && (t.group === undefined || typeof t.group === "string")
     && (t.type !== "transfer" || (typeof t.sub === "string" && typeof t.toSub === "string" && t.sub !== t.toSub));
+}
+
+/** Manual card value for a month (replaces the calculated figure for display), if set. */
+export function overrideFor(txs: Tx[], month: string, key: string) {
+  return txs.find(t => t.type === "override" && t.sub === key && t.date.slice(0, 7) === month)?.amount;
 }
