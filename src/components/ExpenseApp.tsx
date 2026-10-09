@@ -862,7 +862,7 @@ function AdjustmentModal({ kind, month, carry, automaticCarry, manualCarry, avai
               {SUBS.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
           </label>
-          <p className="mt-2 text-sm text-primary">Available {fmt(available(source))}</p>
+          <p className="mt-2 text-sm text-primary">Available {fmt(available(source) + (edit && edit.sub === source ? edit.amount : 0))}</p>
           <label className="mt-3 block text-sm text-muted-foreground">To budget
             <select className={inputCls} value={target} onChange={e => { setTarget(e.target.value); setError(""); }}>
               {SUBS.filter(s => s.id !== source).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -881,7 +881,7 @@ function AdjustmentModal({ kind, month, carry, automaticCarry, manualCarry, avai
             <input type="checkbox" className="mt-1 accent-[var(--primary)]" checked={out} onChange={e => setOut(e.target.checked)} />
             <span><span className="font-semibold">Money actually leaves my account</span><br /><span className="text-xs text-muted-foreground">Tick when you really sent it (e.g. to your MMF or to pay a debt). Leave unticked to only re-label the budget.</span></span>
           </label>
-          {pastMonth && <p role="status" className="mt-3 rounded-lg border border-primary/40 bg-primary/10 p-2 text-xs text-primary">Heads up: you’re changing {monthLabel(month)}, a past month. Its report and the carry-over into later months may change.</p>}
+          {pastMonth && <p role="status" className="mt-3 rounded-lg border border-primary/40 bg-primary/10 p-2 text-xs text-primary">Heads up: you’re changing {monthLabel(activeMonth)}, a past month. Its report and the carry-over into later months may change.</p>}
         </>}
         <label className="mt-3 block text-sm text-muted-foreground">{transfer ? "Reason (required)" : "Note"}<input className={inputCls} value={note} onChange={e => { setNote(e.target.value); setError(""); }} placeholder={transfer ? "e.g. Friend still owes me, saving it instead" : ""} /></label>
         {error && <p role="alert" className="mt-3 text-sm text-destructive">{error}</p>}
