@@ -848,13 +848,14 @@ function AdjustmentModal({ kind, month, carry, automaticCarry, manualCarry, avai
           e.preventDefault();
           const n = money(Number(amount));
           if (!amount.trim() || !Number.isFinite(n) || n < (transfer ? 0.01 : 0)) { setError("Enter a valid amount."); return; }
-          if (transfer && (source === target || n > available(source))) { setError(source === target ? "Choose two different budgets." : "The amount exceeds the source budget’s available balance."); return; }
+          const original = edit && edit.sub === source ? edit.amount : 0;
+          if (transfer && (source === target || n - original > available(source))) { setError(source === target ? "Choose two different budgets." : "The amount exceeds the source budget’s available balance."); return; }
           const f = money(Number(fee) || 0);
           if (transfer && (!Number.isFinite(f) || f < 0)) { setError("Enter a valid transaction cost."); return; }
           if (transfer && !note.trim()) { setError("Add a reason so you remember why this money moved."); return; }
-          onSave({ type: kind, amount: n, date: transfer && month === today().slice(0, 7) ? today() : month + "-01", note: note.trim() || (transfer ? "Budget reallocation" : "Manual opening balance"), ...(transfer ? { sub: source, toSub: target, fee: f, out } : {}) });
+          onSave({ type: kind, amount: n, date: edit ? edit.date : transfer && activeMonth === today().slice(0, 7) ? today() : activeMonth + "-01", note: note.trim() || (transfer ? "Budget reallocation" : "Manual opening balance"), ...(transfer ? { sub: source, toSub: target, fee: f, out } : {}) });
         }}>
-        <h2 id="adjustment-title" className="font-display text-2xl font-bold">{transfer ? "Transfer budget" : "Carry-over · " + monthLabel(month)}</h2>
+        <h2 id="adjustment-title" className="font-display text-2xl font-bold">{transfer ? (edit ? "Edit transfer" : "Transfer budget") : "Carry-over · " + monthLabel(activeMonth)}</h2>
         {transfer && <>
           <label className="mt-4 block text-sm text-muted-foreground">From budget
             <select className={inputCls} value={source} onChange={e => { setSource(e.target.value); setError(""); }}>
