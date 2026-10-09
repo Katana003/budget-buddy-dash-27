@@ -238,6 +238,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
     setEditing(null);
   };
   const openEdit = (t: Tx) => {
+    if (t.type === "override") return;
     setEditing(t);
     setModal(t.type);
   };
