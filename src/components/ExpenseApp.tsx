@@ -712,6 +712,73 @@ function Stat({ label, value, hint, onEdit }: { label: string; value: number; hi
   );
 }
 
+function SubEditModal({
+  name,
+  month,
+  spent,
+  left,
+  onClose,
+  onSave,
+  onClear,
+}: {
+  name: string;
+  month: string;
+  spent: number;
+  left: number;
+  onClose: () => void;
+  onSave: (spent: number, allocated: number) => void;
+  onClear: () => void;
+}) {
+  const [sp, setSp] = useState(String(spent));
+  const [lf, setLf] = useState(String(left));
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", k);
+    return () => window.removeEventListener("keydown", k);
+  }, [onClose]);
+  const spN = parseFloat(sp);
+  const lfN = parseFloat(lf);
+  const valid = Number.isFinite(spN) && spN >= 0 && Number.isFinite(lfN);
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-background/80 px-4 py-6 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <form
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="subedit-title"
+        className="w-full max-w-sm rounded-2xl border border-border bg-card p-6 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!valid) return;
+          onSave(money(spN), money(spN + Math.max(0, lfN)));
+        }}
+      >
+        <h2 id="subedit-title" className="font-display text-2xl font-bold">Edit {name}</h2>
+        <p className="mt-1 text-sm text-muted-foreground">{monthLabel(month)} · set the spent and left amounts by hand.</p>
+        <label className="mt-5 block text-sm text-muted-foreground">
+          Spent
+          <input type="number" min="0" step="0.01" className={inputCls} value={sp} onChange={(e) => setSp(e.target.value)} autoFocus />
+        </label>
+        <label className="mt-4 block text-sm text-muted-foreground">
+          Left
+          <input type="number" step="0.01" className={inputCls} value={lf} onChange={(e) => setLf(e.target.value)} />
+        </label>
+        <p className="mt-3 text-xs text-muted-foreground">Budget becomes Spent + Left. A negative Left marks the category as over budget.</p>
+        <div className="mt-6 flex gap-2">
+          <Button type="submit" disabled={!valid} className="flex-1 rounded-lg bg-primary py-2.5 font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50">
+            Save changes
+          </Button>
+          <Button type="button" onClick={onClear} className={ghost}>Use automatic</Button>
+          <Button type="button" onClick={onClose} className={ghost}>Cancel</Button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function TxModal({
   kind,
   defaultDate,
