@@ -678,7 +678,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
             setTxs((x) => x.filter((t) => !(t.type === "override" && keys.includes(t.sub ?? "") && monthOf(t.date) === month)));
             setSubEdit(null);
           }}
-          onSave={(sp, alloc) => {
+          onSave={(sp: number, alloc: number) => {
             const keys = [subEdit.id, `${subEdit.id}:spent`];
             setTxs((x) => [
               ...x.filter((t) => !(t.type === "override" && keys.includes(t.sub ?? "") && monthOf(t.date) === month)),
