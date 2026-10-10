@@ -508,9 +508,9 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
                             {s.name} <span className="text-muted-foreground">({s.pct}%)</span>
                           </span>
                           <span className="flex items-center gap-1 text-muted-foreground">
-                            {ov(s.id) !== undefined && <span className="text-xs text-primary">manual</span>}
+                            {(ov(s.id) !== undefined || ov(`${s.id}:spent`) !== undefined) && <span className="text-xs text-primary">manual</span>}
                             {fmt(a)}
-                            <button type="button" aria-label={`Edit ${s.name}`} title={`Edit ${s.name} amount`} className="rounded p-0.5 text-primary hover:bg-accent" onClick={() => editCard(s.id, s.name, a)}><Pencil className="h-3.5 w-3.5" /></button>
+                            <button type="button" aria-label={`Edit ${s.name}`} title={`Edit ${s.name} spent and left amounts`} className="rounded p-0.5 text-primary hover:bg-accent" onClick={() => setSubEdit({ id: s.id, name: s.name })}><Pencil className="h-3.5 w-3.5" /></button>
                           </span>
                         </div>
                         <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-muted">
@@ -664,6 +664,29 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
           edit={editing}
           onClose={closeModal}
           onSave={editing ? (t) => update({ ...t, id: editing.id }) : add}
+        />
+      )}
+      {subEdit && (
+        <SubEditModal
+          name={subEdit.name}
+          month={month}
+          spent={spentBy(subEdit.id)}
+          left={available(subEdit.id)}
+          onClose={() => setSubEdit(null)}
+          onClear={() => {
+            const keys = [subEdit.id, `${subEdit.id}:spent`];
+            setTxs((x) => x.filter((t) => !(t.type === "override" && keys.includes(t.sub ?? "") && monthOf(t.date) === month)));
+            setSubEdit(null);
+          }}
+          onSave={(sp, alloc) => {
+            const keys = [subEdit.id, `${subEdit.id}:spent`];
+            setTxs((x) => [
+              ...x.filter((t) => !(t.type === "override" && keys.includes(t.sub ?? "") && monthOf(t.date) === month)),
+              { id: newId(), type: "override", sub: subEdit.id, amount: alloc, note: `Manual ${subEdit.name} budget`, date: month + "-01" },
+              { id: newId(), type: "override", sub: `${subEdit.id}:spent`, amount: sp, note: `Manual ${subEdit.name} spent`, date: month + "-01" },
+            ]);
+            setSubEdit(null);
+          }}
         />
       )}
     </div>
