@@ -156,6 +156,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
   const [month, setMonth] = useState(() => today().slice(0, 7));
   const [modal, setModal] = useState<null | "deposit" | "expense" | "transfer" | "carryover">(null);
   const [editing, setEditing] = useState<Tx | null>(null);
+  const [subEdit, setSubEdit] = useState<{ id: string; name: string } | null>(null);
   const [charts, setCharts] = useState(false);
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -186,7 +187,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
 
   const { stats, balances } = useMemo(() => calculateLedger(txs, month), [txs, month]);
   const monthTx = txs.filter((t) => monthOf(t.date) === month && t.type !== "override");
-  const spentBy = (sub: string) => spentFrom(txs, month, sub);
+  const spentBy = (sub: string) => ov(`${sub}:spent`) ?? spentFrom(txs, month, sub);
   const ov = (key: string) => overrideFor(txs, month, key);
   const editCard = (key: string, label: string, current: number) => {
     const v = window.prompt(`Set ${label} for ${monthLabel(month)}.\nLeave empty to go back to the automatic figure.`, String(current));
