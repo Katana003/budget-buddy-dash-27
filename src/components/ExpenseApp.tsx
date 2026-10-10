@@ -156,6 +156,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
   const [month, setMonth] = useState(() => today().slice(0, 7));
   const [modal, setModal] = useState<null | "deposit" | "expense" | "transfer" | "carryover">(null);
   const [editing, setEditing] = useState<Tx | null>(null);
+  const [subEdit, setSubEdit] = useState<{ id: string; name: string } | null>(null);
   const [charts, setCharts] = useState(false);
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -186,7 +187,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
 
   const { stats, balances } = useMemo(() => calculateLedger(txs, month), [txs, month]);
   const monthTx = txs.filter((t) => monthOf(t.date) === month && t.type !== "override");
-  const spentBy = (sub: string) => spentFrom(txs, month, sub);
+  const spentBy = (sub: string) => ov(`${sub}:spent`) ?? spentFrom(txs, month, sub);
   const ov = (key: string) => overrideFor(txs, month, key);
   const editCard = (key: string, label: string, current: number) => {
     const v = window.prompt(`Set ${label} for ${monthLabel(month)}.\nLeave empty to go back to the automatic figure.`, String(current));
@@ -507,9 +508,9 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
                             {s.name} <span className="text-muted-foreground">({s.pct}%)</span>
                           </span>
                           <span className="flex items-center gap-1 text-muted-foreground">
-                            {ov(s.id) !== undefined && <span className="text-xs text-primary">manual</span>}
+                            {(ov(s.id) !== undefined || ov(`${s.id}:spent`) !== undefined) && <span className="text-xs text-primary">manual</span>}
                             {fmt(a)}
-                            <button type="button" aria-label={`Edit ${s.name}`} title={`Edit ${s.name} amount`} className="rounded p-0.5 text-primary hover:bg-accent" onClick={() => editCard(s.id, s.name, a)}><Pencil className="h-3.5 w-3.5" /></button>
+                            <button type="button" aria-label={`Edit ${s.name}`} title={`Edit ${s.name} spent and left amounts`} className="rounded p-0.5 text-primary hover:bg-accent" onClick={() => setSubEdit({ id: s.id, name: s.name })}><Pencil className="h-3.5 w-3.5" /></button>
                           </span>
                         </div>
                         <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-muted">
@@ -665,6 +666,29 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
           onSave={editing ? (t) => update({ ...t, id: editing.id }) : add}
         />
       )}
+      {subEdit && (
+        <SubEditModal
+          name={subEdit.name}
+          month={month}
+          spent={spentBy(subEdit.id)}
+          left={available(subEdit.id)}
+          onClose={() => setSubEdit(null)}
+          onClear={() => {
+            const keys = [subEdit.id, `${subEdit.id}:spent`];
+            setTxs((x) => x.filter((t) => !(t.type === "override" && keys.includes(t.sub ?? "") && monthOf(t.date) === month)));
+            setSubEdit(null);
+          }}
+          onSave={(sp: number, alloc: number) => {
+            const keys = [subEdit.id, `${subEdit.id}:spent`];
+            setTxs((x) => [
+              ...x.filter((t) => !(t.type === "override" && keys.includes(t.sub ?? "") && monthOf(t.date) === month)),
+              { id: newId(), type: "override", sub: subEdit.id, amount: alloc, note: `Manual ${subEdit.name} budget`, date: month + "-01" },
+              { id: newId(), type: "override", sub: `${subEdit.id}:spent`, amount: sp, note: `Manual ${subEdit.name} spent`, date: month + "-01" },
+            ]);
+            setSubEdit(null);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -684,6 +708,73 @@ function Stat({ label, value, hint, onEdit }: { label: string; value: number; hi
       <p className="text-sm text-muted-foreground">{label}</p>
       <p className="mt-2 font-display text-3xl font-bold">{fmt(value)}</p>
       {hint && <p className="mt-1 text-xs text-muted-foreground">{hint}</p>}
+    </div>
+  );
+}
+
+function SubEditModal({
+  name,
+  month,
+  spent,
+  left,
+  onClose,
+  onSave,
+  onClear,
+}: {
+  name: string;
+  month: string;
+  spent: number;
+  left: number;
+  onClose: () => void;
+  onSave: (spent: number, allocated: number) => void;
+  onClear: () => void;
+}) {
+  const [sp, setSp] = useState(String(spent));
+  const [lf, setLf] = useState(String(left));
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", k);
+    return () => window.removeEventListener("keydown", k);
+  }, [onClose]);
+  const spN = parseFloat(sp);
+  const lfN = parseFloat(lf);
+  const valid = Number.isFinite(spN) && spN >= 0 && Number.isFinite(lfN);
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-background/80 px-4 py-6 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <form
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="subedit-title"
+        className="w-full max-w-sm rounded-2xl border border-border bg-card p-6 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!valid) return;
+          onSave(money(spN), money(spN + Math.max(0, lfN)));
+        }}
+      >
+        <h2 id="subedit-title" className="font-display text-2xl font-bold">Edit {name}</h2>
+        <p className="mt-1 text-sm text-muted-foreground">{monthLabel(month)} · set the spent and left amounts by hand.</p>
+        <label className="mt-5 block text-sm text-muted-foreground">
+          Spent
+          <input type="number" min="0" step="0.01" className={inputCls} value={sp} onChange={(e) => setSp(e.target.value)} autoFocus />
+        </label>
+        <label className="mt-4 block text-sm text-muted-foreground">
+          Left
+          <input type="number" step="0.01" className={inputCls} value={lf} onChange={(e) => setLf(e.target.value)} />
+        </label>
+        <p className="mt-3 text-xs text-muted-foreground">Budget becomes Spent + Left. A negative Left marks the category as over budget.</p>
+        <div className="mt-6 flex gap-2">
+          <Button type="submit" disabled={!valid} className="flex-1 rounded-lg bg-primary py-2.5 font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50">
+            Save changes
+          </Button>
+          <Button type="button" onClick={onClear} className={ghost}>Use automatic</Button>
+          <Button type="button" onClick={onClose} className={ghost}>Cancel</Button>
+        </div>
+      </form>
     </div>
   );
 }
