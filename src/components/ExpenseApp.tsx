@@ -2,6 +2,7 @@ import { Button } from "@/components/ui/button";
 import { ArrowRightLeft, Pencil, Save, Undo2, Wand2 } from "lucide-react";
 import { allocatedTo, calculateLedger, feeOf, isTransaction, money, overrideFor, spentFrom, type Tx } from "@/lib/ledger";
 import { useEffect, useMemo, useState } from "react";
+import { supabase } from "@/integrations/supabase/client";
 import {
   PieChart,
   Pie,
@@ -15,8 +16,6 @@ import {
   Legend,
 } from "recharts";
 
-const USER = "XhizoStrike";
-const PASS = "Timetable#2026";
 const AUTH_KEY = "ledger-auth";
 const DATA_KEY = "ledger-tx";
 const BACKUP_KEY = "ledger-tx-saved";
@@ -77,35 +76,65 @@ const shiftMonth = (m: string, n: number) => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 };
 
+const emailFor = (u: string) =>
+  `${u.trim().toLowerCase().replace(/[^a-z0-9._-]/g, "")}@ledger-app.com`;
+
+type Me = { id: string; username: string; admin: boolean };
+
 export function ExpenseApp() {
   const [ready, setReady] = useState(false);
-  const [authed, setAuthed] = useState(false);
+  const [me, setMe] = useState<Me | null>(null);
   useEffect(() => {
-    setAuthed(localStorage.getItem(AUTH_KEY) === "1");
-    setReady(true);
+    const load = async (uid?: string) => {
+      if (!uid) { setMe(null); setReady(true); return; }
+      const [{ data: p }, { data: admin }] = await Promise.all([
+        supabase.from("profiles").select("username").eq("id", uid).maybeSingle(),
+        supabase.rpc("has_role", { _user_id: uid, _role: "admin" }),
+      ]);
+      setMe({ id: uid, username: p?.username ?? "User", admin: !!admin });
+      setReady(true);
+    };
+    supabase.auth.getUser().then(({ data }) => load(data.user?.id));
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "SIGNED_IN" || event === "SIGNED_OUT") setTimeout(() => load(session?.user.id), 0);
+    });
+    return () => sub.subscription.unsubscribe();
   }, []);
   if (!ready) return <div className="min-h-screen bg-background" />;
-  return authed ? (
-    <Dashboard
-      onLogout={() => {
-        localStorage.removeItem(AUTH_KEY);
-        setAuthed(false);
-      }}
-    />
+  return me ? (
+    <Dashboard key={me.id} me={me} onLogout={() => supabase.auth.signOut()} />
   ) : (
-    <Login
-      onLogin={() => {
-        localStorage.setItem(AUTH_KEY, "1");
-        setAuthed(true);
-      }}
-    />
+    <Login />
   );
 }
 
-function Login({ onLogin }: { onLogin: () => void }) {
+function Login() {
+  const [mode, setMode] = useState<"in" | "up">("in");
   const [u, setU] = useState("");
   const [p, setP] = useState("");
+  const [p2, setP2] = useState("");
   const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    setErr("");
+    const name = u.trim();
+    if (!/^[A-Za-z0-9._-]{3,30}$/.test(name)) return setErr("Username: 3–30 letters, numbers, . _ or -");
+    if (p.length < 6) return setErr("Password must be at least 6 characters.");
+    if (mode === "up" && p !== p2) return setErr("Passwords do not match.");
+    setBusy(true);
+    const { error } =
+      mode === "in"
+        ? await supabase.auth.signInWithPassword({ email: emailFor(name), password: p })
+        : await supabase.auth.signUp({ email: emailFor(name), password: p, options: { data: { username: name } } });
+    setBusy(false);
+    if (error) {
+      setErr(
+        mode === "in"
+          ? "Invalid username or password."
+          : /registered|exists/i.test(error.message) ? "That username is already taken." : error.message,
+      );
+    }
+  };
   return (
     <div
       className="flex min-h-screen items-center justify-center bg-background px-4"
@@ -115,33 +144,39 @@ function Login({ onLogin }: { onLogin: () => void }) {
       }}
     >
       <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (u === USER && p === PASS) onLogin();
-          else setErr("Invalid username or password.");
-        }}
+        onSubmit={(e) => { e.preventDefault(); void submit(); }}
         className="w-full max-w-sm rounded-2xl border border-border bg-card p-8 shadow-2xl"
       >
         <p className="text-xs uppercase tracking-[0.3em] text-primary">Ledger</p>
-        <h1 className="mt-2 font-display text-3xl font-bold">Welcome back</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Sign in to your premium dashboard.</p>
+        <h1 className="mt-2 font-display text-3xl font-bold">{mode === "in" ? "Welcome back" : "Create account"}</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {mode === "in" ? "Sign in to your premium dashboard." : "Your own private ledger, synced on every device."}
+        </p>
         <label className="mt-6 block text-sm text-muted-foreground">
           Username
           <input className={inputCls} value={u} onChange={(e) => setU(e.target.value)} autoFocus />
         </label>
         <label className="mt-4 block text-sm text-muted-foreground">
           Password
-          <input
-            type="password"
-            className={inputCls}
-            value={p}
-            onChange={(e) => setP(e.target.value)}
-          />
+          <input type="password" className={inputCls} value={p} onChange={(e) => setP(e.target.value)} />
         </label>
+        {mode === "up" && (
+          <label className="mt-4 block text-sm text-muted-foreground">
+            Confirm password
+            <input type="password" className={inputCls} value={p2} onChange={(e) => setP2(e.target.value)} />
+          </label>
+        )}
         {err && <p className="mt-3 text-sm text-destructive">{err}</p>}
-        <Button className="mt-6 w-full rounded-lg bg-primary py-2.5 font-semibold text-primary-foreground hover:opacity-90">
-          Sign in
+        <Button disabled={busy} className="mt-6 w-full rounded-lg bg-primary py-2.5 font-semibold text-primary-foreground hover:opacity-90">
+          {busy ? "Please wait…" : mode === "in" ? "Sign in" : "Register"}
         </Button>
+        <button
+          type="button"
+          onClick={() => { setMode(mode === "in" ? "up" : "in"); setErr(""); }}
+          className="mt-4 w-full text-center text-sm text-primary hover:underline"
+        >
+          {mode === "in" ? "New here? Create an account" : "Already have an account? Sign in"}
+        </button>
       </form>
     </div>
   );
@@ -150,7 +185,49 @@ function Login({ onLogin }: { onLogin: () => void }) {
 const inputCls =
   "mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-foreground outline-none focus:border-ring";
 
-function Dashboard({ onLogout }: { onLogout: () => void }) {
+function AdminPanel({ onClose }: { onClose: () => void }) {
+  const [rows, setRows] = useState<{ username: string; joined: string; last_active: string | null }[] | null>(null);
+  const [err, setErr] = useState("");
+  useEffect(() => {
+    supabase.rpc("admin_user_stats").then(({ data, error }) => {
+      if (error) setErr("Could not load users.");
+      else setRows(data ?? []);
+    });
+  }, []);
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4" onClick={onClose}>
+      <div className="max-h-[80vh] w-full max-w-lg overflow-auto rounded-2xl border border-border bg-card p-6" onClick={(e) => e.stopPropagation()}>
+        <h2 className="font-display text-2xl font-bold">App users</h2>
+        {err && <p className="mt-3 text-destructive">{err}</p>}
+        {!rows && !err && <p className="mt-3 text-muted-foreground">Loading…</p>}
+        {rows && (
+          <>
+            <p className="mt-2 text-4xl font-bold text-primary">{rows.length}</p>
+            <p className="text-sm text-muted-foreground">registered {rows.length === 1 ? "user" : "users"}</p>
+            <table className="mt-4 w-full text-sm">
+              <thead className="text-left text-muted-foreground">
+                <tr><th className="py-1">Username</th><th>Joined</th><th>Last active</th></tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.username} className="border-t border-border">
+                    <td className="py-2">{r.username}</td>
+                    <td>{new Date(r.joined).toLocaleDateString()}</td>
+                    <td>{r.last_active ? new Date(r.last_active).toLocaleDateString() : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
+        )}
+        <Button onClick={onClose} className="mt-6 w-full">Close</Button>
+      </div>
+    </div>
+  );
+}
+
+function Dashboard({ me, onLogout }: { me: Me; onLogout: () => void }) {
+  const USER = me.username;
   const [txs, setTxs] = useState<Tx[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [month, setMonth] = useState(() => today().slice(0, 7));
@@ -161,28 +238,47 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [savedAt, setSavedAt] = useState("");
+  const [showAdmin, setShowAdmin] = useState(false);
+  const [syncErr, setSyncErr] = useState("");
 
   useEffect(() => {
-    const read = (key: string) => {
-      try {
-        const v = JSON.parse(localStorage.getItem(key) || "null");
-        return Array.isArray(v) ? v.filter(isTransaction) : null;
-      } catch {
-        return null; // ignore corrupt data
+    (async () => {
+      const { data, error } = await supabase.from("ledgers").select("data").eq("user_id", me.id).maybeSingle();
+      if (error) { setSyncErr("Could not load your data. Check your connection."); return; }
+      let list = Array.isArray(data?.data) ? (data!.data as unknown[]).filter(isTransaction) : null;
+      if (!list) {
+        // First sign-in on the cloud: bring over data saved in this browser, if any.
+        const read = (key: string) => {
+          try {
+            const v = JSON.parse(localStorage.getItem(key) || "null");
+            return Array.isArray(v) ? v.filter(isTransaction) : null;
+          } catch { return null; }
+        };
+        list = read(DATA_KEY) ?? read(BACKUP_KEY) ?? [];
+        await supabase.from("ledgers").upsert({ user_id: me.id, data: list as never });
+        localStorage.removeItem(DATA_KEY);
+        localStorage.removeItem(BACKUP_KEY);
+        localStorage.removeItem(AUTH_KEY);
       }
-    };
-    // Fall back to the last manual save if the live copy is missing or corrupt.
-    setTxs(read(DATA_KEY) ?? read(BACKUP_KEY) ?? []);
-    setLoaded(true);
-  }, []);
+      setTxs(list);
+      setLoaded(true);
+    })();
+  }, [me.id]);
+  const persist = async (list: Tx[]) => {
+    const { error } = await supabase
+      .from("ledgers")
+      .upsert({ user_id: me.id, data: list as never, updated_at: new Date().toISOString() });
+    setSyncErr(error ? "Not saved online — check your connection." : "");
+    return !error;
+  };
   useEffect(() => {
-    if (loaded) localStorage.setItem(DATA_KEY, JSON.stringify(txs));
+    if (!loaded) return;
+    const t = setTimeout(() => void persist(txs), 600);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [txs, loaded]);
-  const saveNow = () => {
-    const data = JSON.stringify(txs);
-    localStorage.setItem(DATA_KEY, data);
-    localStorage.setItem(BACKUP_KEY, data);
-    setSavedAt(new Date().toLocaleTimeString());
+  const saveNow = async () => {
+    if (await persist(txs)) setSavedAt(new Date().toLocaleTimeString());
   };
 
   const { stats, balances } = useMemo(() => calculateLedger(txs, month), [txs, month]);
@@ -338,6 +434,11 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
             <Button onClick={() => setMonth(shiftMonth(month, 1))} className={ghost}>
               ›
             </Button>
+            {me.admin && (
+              <Button onClick={() => setShowAdmin(true)} className={ghost}>
+                Users
+              </Button>
+            )}
             <Button onClick={onLogout} className={ghost}>
               Log out
             </Button>
@@ -345,6 +446,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
         </div>
       </header>
 
+      {showAdmin && <AdminPanel onClose={() => setShowAdmin(false)} />}
       <main className="mx-auto max-w-7xl space-y-8 px-6 pt-8">
         <div className="flex flex-wrap gap-3">
           <Button
@@ -369,6 +471,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
             {charts ? "Hide charts" : "View charts"}
           </Button>
           <div className="ml-auto flex flex-wrap items-center gap-2">
+            {syncErr && <span className="text-xs text-destructive">{syncErr}</span>}
             {savedAt && <span className="text-xs text-success">Saved {savedAt}</span>}
             <Button onClick={saveNow} className="rounded-lg bg-success px-3 py-2 text-sm font-semibold text-success-foreground hover:opacity-90">
               <Save /> Save
@@ -387,7 +490,6 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
                   )
                 ) {
                   setTxs([]);
-                  localStorage.removeItem(BACKUP_KEY);
                   setSavedAt("");
                   setFrom("");
                   setTo("");

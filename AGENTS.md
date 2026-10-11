@@ -11,3 +11,6 @@
 
 - Keep ledger calculations in the browser-safe ledger module; shared calculations keep dashboard balances, transfers and reports consistent.
 - Store budget transfers and monthly opening-balance overrides alongside existing transaction records; overrides replace automatic carry-over and budget-only transfers never change account cash; transfers flagged as leaving the account reduce cash and count as spent in the target budget. Direct deposits (with sub or group) bypass the automatic split.
+
+- Each user's ledger is stored as one JSON row per user in Lovable Cloud (ledgers table); usernames map to synthetic emails so login stays username+password and data syncs across devices.
+- Admin rights come from the user_roles table checked server-side; admin user list is served by a role-checked database function.
