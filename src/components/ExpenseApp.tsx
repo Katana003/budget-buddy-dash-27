@@ -2,6 +2,7 @@ import { Button } from "@/components/ui/button";
 import { ArrowRightLeft, Pencil, Save, Undo2, Wand2 } from "lucide-react";
 import { allocatedTo, calculateLedger, feeOf, isTransaction, money, overrideFor, spentFrom, type Tx } from "@/lib/ledger";
 import { useEffect, useMemo, useState } from "react";
+import { supabase } from "@/integrations/supabase/client";
 import {
   PieChart,
   Pie,
@@ -15,8 +16,6 @@ import {
   Legend,
 } from "recharts";
 
-const USER = "XhizoStrike";
-const PASS = "Timetable#2026";
 const AUTH_KEY = "ledger-auth";
 const DATA_KEY = "ledger-tx";
 const BACKUP_KEY = "ledger-tx-saved";
@@ -435,6 +434,11 @@ function Dashboard({ me, onLogout }: { me: Me; onLogout: () => void }) {
             <Button onClick={() => setMonth(shiftMonth(month, 1))} className={ghost}>
               ›
             </Button>
+            {me.admin && (
+              <Button onClick={() => setShowAdmin(true)} className={ghost}>
+                Users
+              </Button>
+            )}
             <Button onClick={onLogout} className={ghost}>
               Log out
             </Button>
@@ -466,6 +470,7 @@ function Dashboard({ me, onLogout }: { me: Me; onLogout: () => void }) {
             {charts ? "Hide charts" : "View charts"}
           </Button>
           <div className="ml-auto flex flex-wrap items-center gap-2">
+            {syncErr && <span className="text-xs text-destructive">{syncErr}</span>}
             {savedAt && <span className="text-xs text-success">Saved {savedAt}</span>}
             <Button onClick={saveNow} className="rounded-lg bg-success px-3 py-2 text-sm font-semibold text-success-foreground hover:opacity-90">
               <Save /> Save
@@ -484,7 +489,6 @@ function Dashboard({ me, onLogout }: { me: Me; onLogout: () => void }) {
                   )
                 ) {
                   setTxs([]);
-                  localStorage.removeItem(BACKUP_KEY);
                   setSavedAt("");
                   setFrom("");
                   setTo("");
