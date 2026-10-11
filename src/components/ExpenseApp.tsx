@@ -446,6 +446,7 @@ function Dashboard({ me, onLogout }: { me: Me; onLogout: () => void }) {
         </div>
       </header>
 
+      {showAdmin && <AdminPanel onClose={() => setShowAdmin(false)} />}
       <main className="mx-auto max-w-7xl space-y-8 px-6 pt-8">
         <div className="flex flex-wrap gap-3">
           <Button
