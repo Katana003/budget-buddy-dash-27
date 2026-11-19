@@ -46,3 +46,19 @@ describe("Transfers out, fees and direct deposits", () => {
     expect(allocatedTo(txs, "2026-09", stats.autoBase, "rent", 25, { id: "needs", pct: 50 })).toBe(250);
   });
 });
+
+describe("Combined Needs & Bills and Luxury & Wants budgets", () => {
+  it("combines legacy categories, direct deposits, spending, and transfers under one budget each", () => {
+    const txs: Tx[] = [
+      { id: "d", type: "deposit", amount: 1000, date: "2026-09-01", note: "" },
+      { id: "direct", type: "deposit", amount: 100, sub: "rent", date: "2026-09-02", note: "" },
+      { id: "rent", type: "expense", amount: 20, sub: "rent", date: "2026-09-03", note: "" },
+      { id: "food", type: "expense", amount: 30, sub: "food", date: "2026-09-04", note: "" },
+      { id: "transfer", type: "transfer", amount: 50, sub: "debt", toSub: "mmf", date: "2026-09-05", note: "" },
+    ];
+    const { stats } = calculateLedger(txs, "2026-09");
+    expect(allocatedTo(txs, "2026-09", stats.autoBase, "needs", 50, { id: "needs", pct: 50 })).toBe(600);
+    expect(allocatedTo(txs, "2026-09", stats.autoBase, "wants", 20, { id: "wants", pct: 20 })).toBe(150);
+    expect(spentFrom(txs, "2026-09", "needs")).toBe(50);
+  });
+});

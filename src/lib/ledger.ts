@@ -19,6 +19,17 @@ export const money = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100
 export const feeOf = (t: Tx) => Number.isFinite(t.fee) ? (t.fee ?? 0) : 0;
 export const isDirect = (t: Tx) => t.type === "deposit" && Boolean(t.sub || t.group);
 
+const LEGACY_SUB_IDS: Record<string, string> = {
+  rent: "needs",
+  food: "needs",
+  internet: "needs",
+  debt: "wants",
+  shopping: "wants",
+  entertainment: "wants",
+};
+
+export const canonicalSubId = (sub?: string) => sub ? LEGACY_SUB_IDS[sub] ?? sub : undefined;
+
 export function calculateLedger(txs: Tx[], month: string) {
   const months = [...new Set([...txs.map(t => t.date.slice(0, 7)), month])].sort();
   const balances = new Map<string, number>();
@@ -53,18 +64,20 @@ export function calculateLedger(txs: Tx[], month: string) {
  * plus direct deposits to it (or its group, split by share), plus/minus budget transfers.
  */
 export function allocatedTo(txs: Tx[], month: string, autoBase: number, sub: string, pct: number, group?: { id: string; pct: number }) {
+  const budgetId = canonicalSubId(sub) ?? sub;
   const inMonth = txs.filter(t => t.date.slice(0, 7) === month);
   const adjusted = inMonth.filter(t => t.type === "transfer")
-    .reduce((sum, t) => sum + (t.toSub === sub ? t.amount : 0) - (t.sub === sub ? t.amount : 0), 0);
+    .reduce((sum, t) => sum + (canonicalSubId(t.toSub) === budgetId ? t.amount : 0) - (canonicalSubId(t.sub) === budgetId ? t.amount : 0), 0);
   const direct = inMonth.filter(t => t.type === "deposit")
-    .reduce((sum, t) => sum + (t.sub === sub ? t.amount : group && t.group === group.id && group.pct > 0 ? t.amount * pct / group.pct : 0), 0);
+    .reduce((sum, t) => sum + (canonicalSubId(t.sub) === budgetId ? t.amount : group && t.group === group.id && group.pct > 0 ? t.amount * pct / group.pct : 0), 0);
   return money(autoBase * pct / 100 + adjusted + direct);
 }
 
 /** Money spent from a sub-category: expenses plus transfers that left the account into it. */
 export function spentFrom(txs: Tx[], month: string, sub: string) {
+  const budgetId = canonicalSubId(sub) ?? sub;
   return money(txs.filter(t => t.date.slice(0, 7) === month)
-    .reduce((sum, t) => sum + ((t.type === "expense" && t.sub === sub) || (t.type === "transfer" && t.out && t.toSub === sub) ? t.amount : 0), 0));
+    .reduce((sum, t) => sum + ((t.type === "expense" && canonicalSubId(t.sub) === budgetId) || (t.type === "transfer" && t.out && canonicalSubId(t.toSub) === budgetId) ? t.amount : 0), 0));
 }
 
 export function isTransaction(value: unknown): value is Tx {

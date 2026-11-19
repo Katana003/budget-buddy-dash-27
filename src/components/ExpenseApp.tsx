@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { ArrowRightLeft, Pencil, Save, Undo2, Wand2 } from "lucide-react";
-import { allocatedTo, calculateLedger, feeOf, isTransaction, money, overrideFor, spentFrom, type Tx } from "@/lib/ledger";
+import { allocatedTo, calculateLedger, canonicalSubId, feeOf, isTransaction, money, overrideFor, type Tx } from "@/lib/ledger";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import {
@@ -20,29 +20,21 @@ const AUTH_KEY = "ledger-auth";
 const DATA_KEY = "ledger-tx";
 const BACKUP_KEY = "ledger-tx-saved";
 
-// Sub-category shares are a percentage of the whole deposit (they sum to each group's share).
+// Needs and wants are single budgets; savings keeps its two separate budgets.
 const GROUPS = [
   {
     id: "needs",
     name: "Needs & Bills",
     pct: 50,
     color: "var(--chart-1)",
-    subs: [
-      { id: "rent", name: "Rent", pct: 25 },
-      { id: "food", name: "Food", pct: 15 },
-      { id: "internet", name: "Internet", pct: 10 },
-    ],
+    subs: [{ id: "needs", name: "Needs & Bills", pct: 50 }],
   },
   {
     id: "wants",
     name: "Luxury & Wants",
     pct: 20,
     color: "var(--chart-2)",
-    subs: [
-      { id: "debt", name: "Debt", pct: 10 },
-      { id: "shopping", name: "Shopping", pct: 5 },
-      { id: "entertainment", name: "Entertainment", pct: 5 },
-    ],
+    subs: [{ id: "wants", name: "Luxury & Wants", pct: 20 }],
   },
   {
     id: "savings",
@@ -56,7 +48,21 @@ const GROUPS = [
   },
 ];
 const SUBS = GROUPS.flatMap((g) => g.subs.map((s) => ({ ...s, group: g.name })));
-const subName = (id?: string) => SUBS.find((s) => s.id === id)?.name ?? "—";
+const LEGACY_SUBS = [
+  { id: "rent", group: "needs", pct: 25, name: "Rent" },
+  { id: "food", group: "needs", pct: 15, name: "Food" },
+  { id: "internet", group: "needs", pct: 10, name: "Internet" },
+  { id: "debt", group: "wants", pct: 10, name: "Debt" },
+  { id: "shopping", group: "wants", pct: 5, name: "Shopping" },
+  { id: "entertainment", group: "wants", pct: 5, name: "Entertainment" },
+];
+const legacySubsFor = (id: string) => LEGACY_SUBS.filter((s) => s.group === id);
+const subName = (id?: string) => {
+  const current = SUBS.find((s) => s.id === id);
+  if (current) return current.name;
+  const legacy = LEGACY_SUBS.find((s) => s.id === id);
+  return legacy ? `${GROUPS.find((g) => g.id === legacy.group)?.name ?? "Budget"} (${legacy.name})` : "—";
+};
 const groupOfSub = (id: string) => GROUPS.find((g) => g.subs.some((s) => s.id === id));
 
 const newId = () =>
@@ -283,7 +289,14 @@ function Dashboard({ me, onLogout }: { me: Me; onLogout: () => void }) {
 
   const { stats, balances } = useMemo(() => calculateLedger(txs, month), [txs, month]);
   const monthTx = txs.filter((t) => monthOf(t.date) === month && t.type !== "override");
-  const spentBy = (sub: string) => ov(`${sub}:spent`) ?? spentFrom(txs, month, sub);
+  const exactSpent = (sub: string) => money(txs.filter((t) => monthOf(t.date) === month)
+    .reduce((sum, t) => sum + ((t.type === "expense" && canonicalSubId(t.sub) === sub) || (t.type === "transfer" && t.out && canonicalSubId(t.toSub) === sub) ? t.amount : 0), 0));
+  const spentBy = (sub: string) => {
+    const manual = ov(`${sub}:spent`);
+    if (manual !== undefined) return manual;
+    return money([sub, ...legacySubsFor(sub).map((s) => s.id)]
+      .reduce((sum, id) => sum + (ov(`${id}:spent`) ?? exactSpent(id)), 0));
+  };
   const ov = (key: string) => overrideFor(txs, month, key);
   const editCard = (key: string, label: string, current: number) => {
     const v = window.prompt(`Set ${label} for ${monthLabel(month)}.\nLeave empty to go back to the automatic figure.`, String(current));
@@ -298,7 +311,18 @@ function Dashboard({ me, onLogout }: { me: Me; onLogout: () => void }) {
     const g = groupOfSub(sub);
     const manual = ov(sub);
     if (manual !== undefined) return manual;
-    return allocatedTo(txs, month, stats.autoBase, sub, pct, g && { id: g.id, pct: g.pct });
+    const base = allocatedTo(txs, month, stats.autoBase, sub, pct, g && { id: g.id, pct: g.pct });
+    const oldSubs = legacySubsFor(sub);
+    if (!oldSubs.some((legacy) => ov(legacy.id) !== undefined)) return base;
+    const legacyTotal = oldSubs.reduce((sum, legacy) => {
+      const oldGroup = GROUPS.find((group) => group.id === legacy.group);
+      const oldDirect = txs.filter((t) => t.type === "deposit" && monthOf(t.date) === month)
+        .reduce((amount, t) => amount + (t.sub === legacy.id ? t.amount : t.group === legacy.group && oldGroup ? t.amount * legacy.pct / oldGroup.pct : 0), 0);
+      const oldTransfers = txs.filter((t) => t.type === "transfer" && monthOf(t.date) === month)
+        .reduce((amount, t) => amount + (t.toSub === legacy.id ? t.amount : 0) - (t.sub === legacy.id ? t.amount : 0), 0);
+      return sum + (ov(legacy.id) ?? money(stats.autoBase * legacy.pct / 100 + oldDirect + oldTransfers));
+    }, 0);
+    return money(legacyTotal);
   };
   const available = (sub: string) => {
     const category = SUBS.find(s => s.id === sub);
@@ -895,7 +919,7 @@ function TxModal({
   onSave: (t: Omit<Tx, "id">) => void;
 }) {
   const [amount, setAmount] = useState(edit ? String(edit.amount) : "");
-  const [sub, setSub] = useState<string>(edit?.sub ?? SUBS[0]?.id ?? "rent");
+  const [sub, setSub] = useState<string>(canonicalSubId(edit?.sub) ?? SUBS[0]?.id ?? "needs");
   const [note, setNote] = useState(edit?.note ?? "");
   const [date, setDate] = useState(edit?.date ?? defaultDate);
   const [fee, setFee] = useState(edit?.fee ? String(edit.fee) : "");
@@ -1040,8 +1064,8 @@ function AdjustmentModal({ kind, month, carry, automaticCarry, manualCarry, avai
   manualCarry: boolean; available: (sub: string) => number; edit?: Tx | null; onClose: () => void;
   onSave: (t: Omit<Tx, "id">) => void; onAutomatic: () => void;
 }) {
-  const [source, setSource] = useState(edit?.sub ?? "debt");
-  const [target, setTarget] = useState(edit?.toSub ?? "mmf");
+  const [source, setSource] = useState(canonicalSubId(edit?.sub) ?? "wants");
+  const [target, setTarget] = useState(canonicalSubId(edit?.toSub) ?? "mmf");
   const [amount, setAmount] = useState(edit ? String(edit.amount) : kind === "carryover" ? String(carry) : "");
   const [note, setNote] = useState(edit?.note ?? "");
   const [fee, setFee] = useState(edit?.fee ? String(edit.fee) : "");
@@ -1062,7 +1086,7 @@ function AdjustmentModal({ kind, month, carry, automaticCarry, manualCarry, avai
           e.preventDefault();
           const n = money(Number(amount));
           if (!amount.trim() || !Number.isFinite(n) || n < (transfer ? 0.01 : 0)) { setError("Enter a valid amount."); return; }
-          const original = edit && edit.sub === source ? edit.amount : 0;
+          const original = edit && canonicalSubId(edit.sub) === source ? edit.amount : 0;
           if (transfer && (source === target || n - original > available(source))) { setError(source === target ? "Choose two different budgets." : "The amount exceeds the source budget’s available balance."); return; }
           const f = money(Number(fee) || 0);
           if (transfer && (!Number.isFinite(f) || f < 0)) { setError("Enter a valid transaction cost."); return; }
@@ -1076,7 +1100,7 @@ function AdjustmentModal({ kind, month, carry, automaticCarry, manualCarry, avai
               {SUBS.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
           </label>
-          <p className="mt-2 text-sm text-primary">Available {fmt(available(source) + (edit && edit.sub === source ? edit.amount : 0))}</p>
+          <p className="mt-2 text-sm text-primary">Available {fmt(available(source) + (edit && canonicalSubId(edit.sub) === source ? edit.amount : 0))}</p>
           <label className="mt-3 block text-sm text-muted-foreground">To budget
             <select className={inputCls} value={target} onChange={e => { setTarget(e.target.value); setError(""); }}>
               {SUBS.filter(s => s.id !== source).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}

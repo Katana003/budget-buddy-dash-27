@@ -1,4 +1,5 @@
 # Tasks
+- [x] Combine Needs & Bills into one budget and Luxury & Wants into one budget, preserving existing ledger history.
 - [x] Apply premium black and gold theme.
 - [x] Add budget transfers without changing account cash.
 - [x] Add editable monthly carry-over without double counting.
